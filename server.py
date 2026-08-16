@@ -13600,7 +13600,10 @@ async def api_migrate_upload(request):
                     if name.startswith("/") or ".." in name:
                         skipped += 1
                         continue
-                    top = name.split("/")[0]
+                    if name.startswith("buckets/"):
+                        name = name[len("buckets/"):]
+                    parts = name.split("/")
+                    top = parts[0]
                     if top not in safe_dirs and name != "embeddings.db":
                         skipped += 1
                         continue
