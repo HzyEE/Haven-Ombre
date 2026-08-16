@@ -14,6 +14,32 @@ Ombre Brain 是一套以 Markdown 记忆桶为长期真源、同时提供 MCP �
 - **新窗口恢复连续性，不做全库倾倒。** handoff 只携带紧凑的自我、关系和近期上下文。
 - **数据尽量可读、可改、可迁移。** 长期记忆保存在 Markdown；运行索引保存在独立 state 目录。
 
+## Fork 改动
+
+本 fork 在 Haven/Rain 基础上增加了以下改动：
+
+### 1. `always_surface` 与 `pinned/protected` 分离
+
+原版中 `pinned` 和 `protected` 的桶在 `breath()` 浮现时总是出现在核心区，占据大量 token。拆分后：
+
+- `always_surface`：新增元数据字段。标记为 `always_surface` 的桶会强制浮现在核心区（decay score = 999）。
+- `pinned` / `protected`：不再强制浮现，但仍然不会被衰减引擎归档（decay score = 100）。它们进入普通权重池竞争，按活跃度和相关性自然浮现。
+- `trace()` 支持 `always_surface=1` 设置，会自动同步 `pinned=True` 和 `importance=10`。
+
+效果：核心准则区只保留真正需要每次都看到的内容，其余 pinned 桶不再挤占 token 预算。
+
+### 2. 上下文感知浮现（Context-Aware Breath Surfacing）
+
+`breath()` 新增可选 `context` 参数，传入最近对话片段后激活上下文感知排序：
+
+- **情感共鸣**：从 context 中提取情感坐标（valence/arousal），与每条记忆的情感坐标计算欧几里得距离，距离越近加成越高。
+- **话题相关**：从 context 中提取话题关键词（jieba 分词 + 正则），与记忆的 name/tags/domain 做匹配。
+- **加成公式**：`final_score = decay_score × (1 + context_boost)`，其中 `context_boost = emotion_sim × 0.4 + topic_match × 0.6`。
+- 不传 context 时行为与原版完全一致。
+- `breath-hook` HTTP 端点同样支持 `?context=` 查询参数。
+
+效果：浮现的记忆跟随当前对话主题和情感状态动态调整，而不是永远按固定权重排序。
+
 ## 系统组成
 
 ```mermaid
