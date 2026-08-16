@@ -7353,7 +7353,7 @@ async def breath(
 
         logger.info(
             f"Breath surfacing: {len(all_buckets)} total, "
-            f"{len(core_candidates)} core, {len(selected_anchors)} anchors, {len(unresolved)} unresolved"
+            f"{len(always_surface_buckets)} core, {len(selected_anchors)} anchors, {len(unresolved)} unresolved"
             + (f", context_signals={{{('V' + str(ctx_signals['valence']) + '/A' + str(ctx_signals['arousal'])) if ctx_signals else ''}, topics={len(ctx_signals['topic_terms']) if ctx_signals else 0}}}" if ctx_signals else "")
         )
 
