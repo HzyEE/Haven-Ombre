@@ -2842,6 +2842,7 @@
   <div class="tab" data-tab="model-config">模型配置</div>
   <div class="tab" data-tab="memory-config">记忆浮现</div>
   <div class="tab" data-tab="import">导入</div>
+  <div class="tab" data-tab="backup">备份与迁移</div>
 </div>
 
 <div class="content" id="list-view">
@@ -3469,6 +3470,32 @@
     <h3>高频模式检测</h3>
     <button onclick="detectPatterns()">🔍 检测高频模式</button>
     <div id="import-patterns" style="margin-top:16px;"></div>
+  </div>
+</div>
+
+<div class="content" id="backup-view" style="display:none">
+  <div style="max-width:720px;margin:0 auto;">
+    <h3>数据备份</h3>
+    <p style="color:var(--text-dim);font-size:13px;">导出所有记忆桶为 ZIP 文件（包含 dynamic / permanent / feel / archive / letters / plans 及向量数据库）</p>
+    <button class="btn-primary" onclick="downloadExport()" style="margin:16px 0;">📦 导出为 ZIP</button>
+    <div id="export-status" style="margin-top:8px;font-size:13px;color:var(--text-dim);"></div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:32px 0;">
+
+    <h3>数据迁移导入</h3>
+    <p style="color:var(--text-dim);font-size:13px;">上传从其他 Ombre Brain 实例导出的 ZIP 文件，恢复记忆数据</p>
+
+    <div id="migrate-upload-zone" style="border:2px dashed var(--border);border-radius:16px;padding:40px;text-align:center;cursor:pointer;margin:20px 0;transition:border-color .2s;"
+         ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+         ondragleave="this.style.borderColor='var(--border)'"
+         ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleMigrateFile(event.dataTransfer.files[0])"
+         onclick="document.getElementById('migrate-file-input').click()">
+      <div style="font-size:32px;margin-bottom:8px;">📥</div>
+      <div>拖拽 ZIP 文件到此处，或 <span style="color:var(--accent);text-decoration:underline;">点击选择</span></div>
+      <input type="file" id="migrate-file-input" accept=".zip" style="display:none" onchange="handleMigrateFile(this.files[0])" />
+    </div>
+
+    <div id="migrate-status" style="display:none;margin:16px 0;padding:12px 16px;border-radius:8px;font-size:13px;"></div>
   </div>
 </div>
 
@@ -8989,6 +9016,48 @@ async function batchReview(idsJson, action) {
     });
     detectPatterns();
   } catch(e) {}
+}
+
+function downloadExport() {
+  const st = document.getElementById('export-status');
+  st.textContent = '正在生成 ZIP…';
+  const a = document.createElement('a');
+  a.href = BASE + '/api/export';
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => { st.textContent = '下载已开始，如未弹出请检查浏览器下载设置'; }, 1000);
+}
+
+async function handleMigrateFile(file) {
+  if (!file) return;
+  const st = document.getElementById('migrate-status');
+  st.style.display = 'block';
+  st.style.background = 'var(--surface)';
+  st.style.color = 'var(--text)';
+  st.textContent = '正在上传并导入 ' + file.name + '…';
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await authFetch(BASE + '/api/migrate/upload', { method: 'POST', body: fd });
+    if (!res) { st.textContent = '认证失败'; return; }
+    const data = await res.json();
+    if (data.error) {
+      st.style.background = 'rgba(255,80,80,0.15)';
+      st.style.color = 'var(--negative)';
+      st.textContent = '导入失败: ' + data.error;
+    } else {
+      st.style.background = 'rgba(80,200,120,0.15)';
+      st.style.color = 'var(--positive)';
+      st.textContent = data.message || ('成功导入 ' + data.restored + ' 个文件');
+    }
+  } catch(e) {
+    st.style.background = 'rgba(255,80,80,0.15)';
+    st.style.color = 'var(--negative)';
+    st.textContent = '上传失败: ' + e.message;
+  }
 }
 
 function loadDashboardModule(path) {

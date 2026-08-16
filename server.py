@@ -13462,6 +13462,170 @@ async def api_import_review(request):
     return JSONResponse({"applied": applied, "errors": errors})
 
 
+# =============================================================
+# Backup & Migration API — ZIP export/import
+# 备份与迁移 API — ZIP 导出/导入
+# =============================================================
+
+_export_lock = threading.Lock() if "threading" in dir() else __import__("threading").Lock()
+
+@mcp.custom_route("/api/export", methods=["GET"])
+async def api_export(request):
+    """Export all bucket data as a ZIP file."""
+    from starlette.responses import JSONResponse, FileResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+
+    buckets_dir = config.get("buckets_dir", "buckets")
+    if not os.path.isdir(buckets_dir):
+        return JSONResponse({"error": f"buckets_dir not found: {buckets_dir}"}, status_code=500)
+
+    if not _export_lock.acquire(blocking=False):
+        return JSONResponse({"error": "导出任务正在进行，请稍后重试"}, status_code=409)
+
+    import tempfile
+    import zipfile as _zipfile
+    tmp_path = ""
+    try:
+        dirs_to_export = ["dynamic", "permanent", "feel", "archive", "letters", "plans"]
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="ombre_export_")
+        os.close(fd)
+
+        def _build_zip():
+            with _zipfile.ZipFile(tmp_path, "w", _zipfile.ZIP_DEFLATED) as zf:
+                for subdir in dirs_to_export:
+                    full = os.path.join(buckets_dir, subdir)
+                    if not os.path.isdir(full):
+                        continue
+                    for root, _dirs, files in os.walk(full):
+                        for f in files:
+                            fpath = os.path.join(root, f)
+                            arcname = os.path.relpath(fpath, buckets_dir)
+                            zf.write(fpath, arcname)
+                emb_db = os.path.join(buckets_dir, "embeddings.db")
+                if os.path.isfile(emb_db):
+                    zf.write(emb_db, "embeddings.db")
+
+        await asyncio.to_thread(_build_zip)
+
+        fname = f"ombre_export_{int(time.time())}.zip"
+
+        async def _cleanup():
+            try:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            finally:
+                if _export_lock.locked():
+                    _export_lock.release()
+
+        from starlette.background import BackgroundTask
+        return FileResponse(
+            tmp_path,
+            media_type="application/zip",
+            filename=fname,
+            background=BackgroundTask(_cleanup),
+        )
+    except Exception as e:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        if _export_lock.locked():
+            _export_lock.release()
+        logger.error("export failed", exc_info=True)
+        return JSONResponse({"error": f"export failed: {e}"}, status_code=500)
+
+
+@mcp.custom_route("/api/migrate/upload", methods=["POST"])
+async def api_migrate_upload(request):
+    """Upload an exported ZIP and restore buckets."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+
+    buckets_dir = config.get("buckets_dir", "buckets")
+    if not os.path.isdir(buckets_dir):
+        return JSONResponse({"error": f"buckets_dir not found: {buckets_dir}"}, status_code=500)
+
+    import tempfile
+    import zipfile as _zipfile
+
+    content_type = request.headers.get("content-type", "")
+    body = b""
+    max_size = 512 * 1024 * 1024
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > max_size:
+            return JSONResponse({"error": "文件过大，上限 512MB"}, status_code=413)
+
+    if b"" == body:
+        return JSONResponse({"error": "未收到文件"}, status_code=400)
+
+    if "multipart" in content_type:
+        boundary = content_type.split("boundary=")[-1].strip()
+        parts = body.split(f"--{boundary}".encode())
+        file_data = None
+        for part in parts:
+            if b"filename=" in part:
+                header_end = part.find(b"\r\n\r\n")
+                if header_end > 0:
+                    file_data = part[header_end + 4:]
+                    if file_data.endswith(b"\r\n"):
+                        file_data = file_data[:-2]
+                break
+        if not file_data:
+            return JSONResponse({"error": "未找到上传文件"}, status_code=400)
+        body = file_data
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".zip", prefix="ombre_migrate_")
+    try:
+        os.write(fd, body)
+        os.close(fd)
+
+        if not _zipfile.is_zipfile(tmp_path):
+            os.unlink(tmp_path)
+            return JSONResponse({"error": "不是有效的 ZIP 文件"}, status_code=400)
+
+        restored = 0
+        skipped = 0
+        safe_dirs = {"dynamic", "permanent", "feel", "archive", "letters", "plans"}
+
+        def _extract():
+            nonlocal restored, skipped
+            with _zipfile.ZipFile(tmp_path, "r") as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    name = info.filename.replace("\\", "/")
+                    if name.startswith("/") or ".." in name:
+                        skipped += 1
+                        continue
+                    top = name.split("/")[0]
+                    if top not in safe_dirs and name != "embeddings.db":
+                        skipped += 1
+                        continue
+                    dest = os.path.join(buckets_dir, name)
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with zf.open(info) as src, open(dest, "wb") as dst:
+                        dst.write(src.read())
+                    restored += 1
+
+        await asyncio.to_thread(_extract)
+        os.unlink(tmp_path)
+
+        return JSONResponse({
+            "status": "ok",
+            "restored": restored,
+            "skipped": skipped,
+            "message": f"成功导入 {restored} 个文件，跳过 {skipped} 个",
+        })
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        logger.error("migrate upload failed", exc_info=True)
+        return JSONResponse({"error": f"导入失败: {e}"}, status_code=500)
+
+
 # --- Entry point / 启动入口 ---
 if __name__ == "__main__":
     transport = config.get("transport", "stdio")
