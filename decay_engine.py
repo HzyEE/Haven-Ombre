@@ -182,6 +182,65 @@ class DecayEngine:
 
         return round(base_score * resolved_factor * urgency_boost, 4)
 
+    def contextual_score(
+        self,
+        metadata: dict,
+        *,
+        context_valence: float | None = None,
+        context_arousal: float | None = None,
+        topic_terms: list[str] | None = None,
+    ) -> float:
+        """
+        Context-aware decay score: base score × (1 + context_boost).
+        上下文感知衰减分：基础分 × (1 + 上下文加成)。
+
+        context_boost = emotion_similarity × 0.4 + topic_match × 0.6
+        emotion_similarity: Euclidean distance in valence/arousal space (0~1)
+        topic_match: whether any topic_term appears in bucket name/tags/domain (0 or 1)
+        """
+        base = self.calculate_score(metadata)
+        if not isinstance(metadata, dict):
+            return base
+
+        has_emotion = context_valence is not None and context_arousal is not None
+        has_topic = bool(topic_terms)
+        if not has_emotion and not has_topic:
+            return base
+
+        emotion_sim = 0.5
+        if has_emotion:
+            try:
+                b_valence = float(metadata.get("valence", 0.5))
+                b_arousal = float(metadata.get("arousal", 0.3))
+                dist = math.sqrt(
+                    (context_valence - b_valence) ** 2
+                    + (context_arousal - b_arousal) ** 2
+                )
+                emotion_sim = max(0.0, 1.0 - dist / 1.414)
+            except (ValueError, TypeError):
+                emotion_sim = 0.5
+
+        topic_match = 0.0
+        if has_topic:
+            bucket_text = " ".join([
+                str(metadata.get("name") or ""),
+                " ".join(str(t) for t in metadata.get("tags", []) or []),
+                " ".join(str(d) for d in metadata.get("domain", []) or []),
+            ]).lower()
+            for term in topic_terms:
+                if str(term).lower() in bucket_text:
+                    topic_match = 1.0
+                    break
+
+        if has_emotion and has_topic:
+            context_boost = emotion_sim * 0.4 + topic_match * 0.6
+        elif has_emotion:
+            context_boost = emotion_sim
+        else:
+            context_boost = topic_match
+
+        return round(base * (1.0 + context_boost), 4)
+
     # ---------------------------------------------------------
     # Execute one decay cycle
     # 执行一轮衰减周期

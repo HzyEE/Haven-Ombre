@@ -1558,6 +1558,91 @@ async def _read_self_anchor_domain_breath(query: str = "", max_tokens: int = 100
     return "=== 自我分段 ===\n" + ("\n---\n".join(rows) if rows else "没有找到相关自我分段。")
 
 
+_CONTEXT_EMOTION_KEYWORDS: dict[str, tuple[float, float]] = {
+    "生气": (0.2, 0.8), "愤怒": (0.1, 0.9), "烦": (0.3, 0.6),
+    "焦虑": (0.3, 0.7), "烦躁": (0.3, 0.7), "崩溃": (0.2, 0.8),
+    "难过": (0.2, 0.3), "伤心": (0.2, 0.4), "累": (0.3, 0.2),
+    "疲惫": (0.2, 0.2), "低落": (0.2, 0.2), "沮丧": (0.2, 0.3),
+    "哭": (0.2, 0.5), "委屈": (0.2, 0.5), "孤独": (0.2, 0.2),
+    "寂寞": (0.2, 0.2), "不安": (0.3, 0.6), "emo": (0.3, 0.3),
+    "开心": (0.8, 0.7), "高兴": (0.8, 0.6), "快乐": (0.9, 0.7),
+    "幸福": (0.9, 0.5), "兴奋": (0.8, 0.9), "激动": (0.8, 0.8),
+    "安心": (0.8, 0.3), "温柔": (0.7, 0.3), "舒服": (0.7, 0.3),
+    "感动": (0.8, 0.5), "甜": (0.8, 0.4), "想你": (0.6, 0.5),
+    "想念": (0.5, 0.4), "害怕": (0.3, 0.7), "恐惧": (0.2, 0.8),
+    "紧张": (0.4, 0.7), "羞耻": (0.3, 0.5), "尴尬": (0.3, 0.5),
+    "心疼": (0.4, 0.5), "无聊": (0.4, 0.2), "迷茫": (0.3, 0.3),
+    "失望": (0.2, 0.4), "后悔": (0.2, 0.4), "嫉妒": (0.3, 0.7),
+    "感激": (0.8, 0.4), "骄傲": (0.8, 0.6), "满足": (0.8, 0.3),
+}
+_CONTEXT_TOPIC_STOP_WORDS = frozenset({
+    "我", "你", "他", "她", "它", "我们", "你们", "他们", "她们",
+    "的", "了", "在", "是", "有", "和", "也", "就", "都", "不",
+    "吧", "吗", "呢", "啊", "呀", "嘛", "哦", "嗯", "哈", "呜",
+    "很", "好", "太", "真", "真的", "特别", "非常", "超", "比较",
+    "这", "那", "这个", "那个", "什么", "怎么", "为什么", "哪",
+    "今天", "昨天", "明天", "现在", "刚才", "之前", "以后",
+    "一个", "一下", "一点", "一些", "还", "又", "再", "把", "被",
+    "说", "想", "看", "去", "来", "做", "会", "能", "要",
+})
+
+
+def _extract_context_signals(context: str) -> dict:
+    """
+    Extract emotion coordinates and topic terms from conversation context.
+    从对话上下文中提取情感坐标和话题关键词。
+    """
+    text = str(context or "").strip()
+    if not text:
+        return {"valence": None, "arousal": None, "topic_terms": []}
+
+    valence_sum = 0.0
+    arousal_sum = 0.0
+    emotion_hits = 0
+    for keyword, (v, a) in _CONTEXT_EMOTION_KEYWORDS.items():
+        count = text.count(keyword)
+        if count > 0:
+            valence_sum += v * count
+            arousal_sum += a * count
+            emotion_hits += count
+
+    ctx_valence = round(valence_sum / emotion_hits, 2) if emotion_hits else None
+    ctx_arousal = round(arousal_sum / emotion_hits, 2) if emotion_hits else None
+
+    topic_terms: list[str] = []
+    try:
+        import jieba
+        words = list(jieba.cut(text))
+        seen: set[str] = set()
+        for word in words:
+            w = word.strip()
+            if (
+                len(w) >= 2
+                and w not in _CONTEXT_TOPIC_STOP_WORDS
+                and w not in _CONTEXT_EMOTION_KEYWORDS
+                and w not in seen
+            ):
+                seen.add(w)
+                topic_terms.append(w)
+    except ImportError:
+        import re as _re
+        for m in _re.finditer(r"[一-鿿]{2,6}", text):
+            w = m.group()
+            if w not in _CONTEXT_TOPIC_STOP_WORDS and w not in _CONTEXT_EMOTION_KEYWORDS:
+                if w not in topic_terms:
+                    topic_terms.append(w)
+    for m in re.finditer(r"[A-Za-z][A-Za-z0-9_.:/-]{2,}", text):
+        w = m.group()
+        if w.lower() not in {"the", "and", "for", "not", "but", "with"} and w not in topic_terms:
+            topic_terms.append(w)
+
+    return {
+        "valence": ctx_valence,
+        "arousal": ctx_arousal,
+        "topic_terms": topic_terms[:20],
+    }
+
+
 def _normalize_breath_mode(value: object) -> str:
     mode = str(value or "").strip().lower()
     return mode if mode in {"", "handoff"} else ""
@@ -3220,6 +3305,8 @@ async def breath_hook(request):
                 )
             )
         all_buckets = await bucket_mgr.list_all(include_archive=False)
+        hook_context = str(request.query_params.get("context") or "").strip()
+        hook_ctx_signals = _extract_context_signals(hook_context) if hook_context else None
         # always_surface only
         pinned = [
             b for b in all_buckets
@@ -3233,7 +3320,19 @@ async def breath_hook(request):
                       and b["metadata"].get("type") not in ("permanent", "feel")
                       and not b["metadata"].get("anchor", False)
                       and not b["metadata"].get("always_surface")]
-        scored = sorted(unresolved, key=lambda b: decay_engine.calculate_score(b["metadata"]), reverse=True)
+        if hook_ctx_signals and (hook_ctx_signals["valence"] is not None or hook_ctx_signals["topic_terms"]):
+            scored = sorted(
+                unresolved,
+                key=lambda b: decay_engine.contextual_score(
+                    b["metadata"],
+                    context_valence=hook_ctx_signals["valence"],
+                    context_arousal=hook_ctx_signals["arousal"],
+                    topic_terms=hook_ctx_signals["topic_terms"],
+                ),
+                reverse=True,
+            )
+        else:
+            scored = sorted(unresolved, key=lambda b: decay_engine.calculate_score(b["metadata"]), reverse=True)
         anchors = _select_anchor_buckets(all_buckets, limit=2)
 
         parts = []
@@ -7096,12 +7195,13 @@ async def breath(
     is_session_start: bool = False,
     debug: bool = False,
     surface: str = "manual",
+    context: str = "",
     direct_render_mode: str = "auto",
     retrieval_mode: str = "graph",
     mode: str = "",
     session_id: str = "",
 ) -> str:
-    """只读检索记忆。查主题用 query；新窗口轻交接用 mode="handoff"；date 或 query 里的日期可查当天普通记忆；domain="feel"/"whisper" 读私密通道，domain="daily_impression" 才读日印象。日期支持 2026-06-15、2026.06.15、2026年6月15日、25年6月15日、6月15日。"""
+    """只读检索记忆。查主题用 query；新窗口轻交接用 mode="handoff"；date 或 query 里的日期可查当天普通记忆；domain="feel"/"whisper" 读私密通道，domain="daily_impression" 才读日印象。context 传最近对话片段可激活上下文感知浮现——按情感共鸣和话题相关度重新排序，让当前相关的记忆优先浮现。日期支持 2026-06-15、2026.06.15、2026年6月15日、25年6月15日、6月15日。"""
     await decay_engine.ensure_started()
     max_results = _int_between(max_results, 20, 1, 50)
     max_tokens = _int_between(max_tokens, 10000, 0, 20000)
@@ -7247,16 +7347,33 @@ async def breath(
             and not b["metadata"].get("always_surface", False)
         ]
 
+        # --- Context-aware scoring ---
+        # --- 上下文感知评分 ---
+        ctx_signals = _extract_context_signals(context) if context and context.strip() else None
+
         logger.info(
             f"Breath surfacing: {len(all_buckets)} total, "
             f"{len(core_candidates)} core, {len(selected_anchors)} anchors, {len(unresolved)} unresolved"
+            + (f", context_signals={{{('V' + str(ctx_signals['valence']) + '/A' + str(ctx_signals['arousal'])) if ctx_signals else ''}, topics={len(ctx_signals['topic_terms']) if ctx_signals else 0}}}" if ctx_signals else "")
         )
 
-        scored = sorted(
-            unresolved,
-            key=lambda b: decay_engine.calculate_score(b["metadata"]),
-            reverse=True,
-        )
+        if ctx_signals and (ctx_signals["valence"] is not None or ctx_signals["topic_terms"]):
+            scored = sorted(
+                unresolved,
+                key=lambda b: decay_engine.contextual_score(
+                    b["metadata"],
+                    context_valence=ctx_signals["valence"],
+                    context_arousal=ctx_signals["arousal"],
+                    topic_terms=ctx_signals["topic_terms"],
+                ),
+                reverse=True,
+            )
+        else:
+            scored = sorted(
+                unresolved,
+                key=lambda b: decay_engine.calculate_score(b["metadata"]),
+                reverse=True,
+            )
 
         if scored:
             top_scores = [(b["metadata"].get("name", b["id"]), decay_engine.calculate_score(b["metadata"])) for b in scored[:5]]
@@ -7324,7 +7441,15 @@ async def breath(
             try:
                 clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
                 summary = await dehydrator.dehydrate(_bucket_text_for_embedding(b), clean_meta)
-                score = decay_engine.calculate_score(b["metadata"])
+                if ctx_signals and (ctx_signals["valence"] is not None or ctx_signals["topic_terms"]):
+                    score = decay_engine.contextual_score(
+                        b["metadata"],
+                        context_valence=ctx_signals["valence"],
+                        context_arousal=ctx_signals["arousal"],
+                        topic_terms=ctx_signals["topic_terms"],
+                    )
+                else:
+                    score = decay_engine.calculate_score(b["metadata"])
                 entry = f"[权重:{score:.2f}] [bucket_id:{b['id']}] {summary}"
                 entry_tokens = count_tokens_approx(entry)
                 if entry_tokens > token_budget:
