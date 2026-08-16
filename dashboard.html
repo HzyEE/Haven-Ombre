@@ -546,6 +546,8 @@
     text-overflow: ellipsis;
   }
   .bucket-row .emotion { font-size: 11px; }
+  @keyframes ob-bob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-2px)} }
+  .bucket-row:hover .feel-face { animation: ob-bob .7s ease-in-out; }
   .bucket-row .score {
     font-size: 12px;
     text-align: right;
@@ -6443,6 +6445,26 @@ async function deleteSelectedBuckets() {
   }
 }
 
+function feelFace(v, a) {
+  v = (v == null ? 0.5 : v); a = (a == null ? 0.3 : a);
+  var mouth = v >= 0.62 ? 'M5 10 Q8 13 11 10'
+            : v <= 0.38 ? 'M5 11.5 Q8 8.5 11 11.5'
+                        : 'M5.5 10.7 L10.5 10.7';
+  var eye = a >= 0.6
+        ? '<circle cx="6" cy="6.6" r="1.5"/><circle cx="10" cy="6.6" r="1.5"/>'
+        : (a <= 0.3
+            ? '<path d="M4.7 6.9 Q6 6.1 7.3 6.9" fill="none" stroke-width="1.1"/><path d="M8.7 6.9 Q10 6.1 11.3 6.9" fill="none" stroke-width="1.1"/>'
+            : '<circle cx="6" cy="6.6" r="1"/><circle cx="10" cy="6.6" r="1"/>');
+  var color = v >= 0.62 ? 'var(--positive)' : (v <= 0.38 ? 'var(--negative)' : 'var(--text-dim)');
+  var blush = (a >= 0.6 && v >= 0.6) ? '<circle cx="3.6" cy="9.2" r="0.9" fill="var(--accent)" opacity="0.5" stroke="none"/><circle cx="12.4" cy="9.2" r="0.9" fill="var(--accent)" opacity="0.5" stroke="none"/>' : '';
+  return '<svg class="feel-face" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" style="color:' + color + ';vertical-align:-3px;">' +
+    '<circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
+    blush +
+    '<g fill="currentColor" stroke="currentColor">' + eye + '</g>' +
+    '<path d="' + mouth + '" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>' +
+    '</svg>';
+}
+
 function renderBuckets(buckets) {
   var list = document.getElementById('bucket-list');
   var sortedBuckets = sortBucketsForDisplay(buckets);
@@ -6455,7 +6477,7 @@ function renderBuckets(buckets) {
   }
   list.innerHTML = sortedBuckets.map(function(b) {
     var id = String(b.id || '');
-    var icon = b.anchor ? '⚓' : b.pinned ? '📌' : b.type === 'feel' ? '🫧' : b.digested ? '🌿' : b.resolved ? '💤' : '💭';
+    var icon = b.anchor ? '⚓' : b.pinned ? '📌' : b.type === 'feel' ? feelFace(b.valence, b.arousal) : b.digested ? '🌿' : b.resolved ? '💤' : '💭';
     var vPos = Math.round(b.valence * 100);
     var modelV = b.model_valence != null ? ' → V' + b.model_valence.toFixed(1) : '';
     var timeAgo = formatTimeAgo(b.created || b.last_active);
@@ -7681,7 +7703,7 @@ async function runBreathDebug() {
     results.innerHTML = data.results.map(function(r, i) {
       var s = r.scores;
       var passed = r.passed_threshold;
-      var icon = r.anchor ? '⚓' : r.pinned ? '📌' : r.resolved ? '💤' : r.type === 'feel' ? '🫧' : '💭';
+      var icon = r.anchor ? '⚓' : r.pinned ? '📌' : r.resolved ? '💤' : r.type === 'feel' ? feelFace(r.valence, r.arousal) : '💭';
       var bars = Object.entries(s).map(function(entry) {
         var key = entry[0], val = entry[1];
         var pct = Math.round(val * 100);
