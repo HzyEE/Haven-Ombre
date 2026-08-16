@@ -2841,6 +2841,7 @@
   <div class="tab" data-tab="upstream-config">上游模型</div>
   <div class="tab" data-tab="model-config">模型配置</div>
   <div class="tab" data-tab="memory-config">记忆浮现</div>
+  <div class="tab" data-tab="letters">信件</div>
   <div class="tab" data-tab="import">导入</div>
   <div class="tab" data-tab="backup">备份与迁移</div>
 </div>
@@ -3473,6 +3474,27 @@
   </div>
 </div>
 
+<div class="content" id="letters-view" style="display:none">
+  <div style="max-width:720px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;">信件</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="letter-filter-author" onchange="loadLetters()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
+          <option value="">全部</option>
+          <option value="ai">AI 写的</option>
+          <option value="user">用户写的</option>
+        </select>
+        <button class="btn-secondary" onclick="loadLetters()" style="font-size:13px;">刷新</button>
+      </div>
+    </div>
+    <div id="letters-list" style="display:flex;flex-direction:column;gap:16px;"></div>
+    <div id="letters-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
+      <div style="font-size:32px;margin-bottom:8px;">💌</div>
+      <div>还没有信件</div>
+    </div>
+  </div>
+</div>
+
 <div class="content" id="backup-view" style="display:none">
   <div style="max-width:720px;margin:0 auto;">
     <h3>数据备份</h3>
@@ -4003,8 +4025,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('config-view').style.display = target === 'config' ? '' : 'none';
     document.getElementById('upstream-config-view').style.display = target === 'upstream-config' ? '' : 'none';
     document.getElementById('model-config-view').style.display = target === 'model-config' ? '' : 'none';
+    document.getElementById('letters-view').style.display = target === 'letters' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
     document.getElementById('backup-view').style.display = target === 'backup' ? '' : 'none';
+    if (target === 'letters') loadLetters();
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
     if (target === 'memory-config') loadConfig();
@@ -9017,6 +9041,40 @@ async function batchReview(idsJson, action) {
     });
     detectPatterns();
   } catch(e) {}
+}
+
+async function loadLetters() {
+  const listEl = document.getElementById('letters-list');
+  const emptyEl = document.getElementById('letters-empty');
+  listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px;">加载中…</div>';
+  emptyEl.style.display = 'none';
+  try {
+    const authorFilter = document.getElementById('letter-filter-author').value;
+    const url = authUrl('/api/letters') + (authorFilter ? '&author=' + authorFilter : '');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const letters = await res.json();
+    if (!letters.length) {
+      listEl.innerHTML = '';
+      emptyEl.style.display = '';
+      return;
+    }
+    listEl.innerHTML = letters.map(function(l) {
+      const authorLabel = l.author === 'user' ? (l.user_name || '用户') : l.author;
+      const isAI = l.author !== 'user';
+      const borderColor = isAI ? 'var(--accent)' : 'var(--text-dim)';
+      const contentHtml = l.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+      return '<div style="border-left:3px solid ' + borderColor + ';padding:12px 16px;border-radius:8px;background:var(--card-bg);">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+          '<span style="font-weight:600;font-size:14px;">' + (l.title || '无标题') + '</span>' +
+          '<span style="font-size:12px;color:var(--text-dim);">' + authorLabel + ' · ' + l.date + '</span>' +
+        '</div>' +
+        '<div style="font-size:13px;line-height:1.7;color:var(--text);white-space:pre-wrap;word-break:break-word;">' + contentHtml + '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="color:var(--negative);padding:20px;">加载失败: ' + e.message + '</div>';
+  }
 }
 
 function downloadExport() {

@@ -9883,6 +9883,47 @@ async def api_buckets(request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@mcp.custom_route("/api/letters", methods=["GET"])
+async def api_letters(request):
+    """List all letters with full content."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        author_filter = request.query_params.get("author", "")
+        all_buckets = await bucket_mgr.list_all(include_archive=False)
+        letters = [b for b in all_buckets
+                   if b.get("metadata", {}).get("type") == "letter"
+                   or "__letter__" in (b.get("metadata", {}).get("tags") or [])]
+        if author_filter:
+            af_low = author_filter.lower()
+            if af_low == "user":
+                letters = [b for b in letters if b["metadata"].get("author") == "user"]
+            elif af_low == "ai":
+                ai_name = os.environ.get("AI_NAME", "AI")
+                ai_aliases = {ai_name, "claude", "AI"}
+                letters = [b for b in letters if b["metadata"].get("author") in ai_aliases]
+        letters.sort(
+            key=lambda b: b["metadata"].get("letter_date") or b["metadata"].get("created", ""),
+            reverse=True,
+        )
+        result = []
+        for b in letters:
+            m = b.get("metadata", {})
+            result.append({
+                "id": b["id"],
+                "author": m.get("author", "?"),
+                "title": m.get("title") or m.get("name", ""),
+                "date": (m.get("letter_date") or m.get("created", ""))[:10],
+                "content": b.get("content", ""),
+                "user_name": m.get("user_name", ""),
+            })
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @mcp.custom_route("/api/buckets/light", methods=["GET"])
 async def api_buckets_light(request):
     """List lightweight bucket metadata without content previews."""
