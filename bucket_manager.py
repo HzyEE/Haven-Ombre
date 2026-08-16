@@ -72,6 +72,7 @@ class BucketManager:
         self.dynamic_dir = os.path.join(self.base_dir, "dynamic")
         self.archive_dir = os.path.join(self.base_dir, "archive")
         self.feel_dir = os.path.join(self.base_dir, "feel")
+        self.letters_dir = os.path.join(self.base_dir, "letters")
         self.tombstone_dir = os.path.join(self.base_dir, ".tombstones")
         self.fuzzy_threshold = config.get("matching", {}).get("fuzzy_threshold", 50)
         self.max_results = config.get("matching", {}).get("max_results", 5)
@@ -214,6 +215,8 @@ class BucketManager:
                 metadata["type"] = "permanent"
         elif bucket_type == "feel":
             type_dir = self.feel_dir
+        elif bucket_type == "letter":
+            type_dir = self.letters_dir
         else:
             type_dir = self.dynamic_dir
         if bucket_type == "feel":
@@ -1265,7 +1268,7 @@ class BucketManager:
         """
         buckets = []
 
-        dirs = [self.permanent_dir, self.dynamic_dir, self.feel_dir]
+        dirs = [self.permanent_dir, self.dynamic_dir, self.feel_dir, self.letters_dir]
         if include_archive:
             dirs.append(self.archive_dir)
 
@@ -1297,6 +1300,7 @@ class BucketManager:
             "dynamic_count": 0,
             "archive_count": 0,
             "feel_count": 0,
+            "letter_count": 0,
             "total_size_kb": 0.0,
             "domains": {},
         }
@@ -1306,6 +1310,7 @@ class BucketManager:
             (self.dynamic_dir, "dynamic_count"),
             (self.archive_dir, "archive_count"),
             (self.feel_dir, "feel_count"),
+            (self.letters_dir, "letter_count"),
         ]:
             if not os.path.exists(subdir):
                 continue

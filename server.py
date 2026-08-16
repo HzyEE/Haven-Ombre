@@ -8671,6 +8671,133 @@ async def _grow_direct_structured_content(content: str, title: str = "", gate_pr
     return f"{gate_prefix}1条|新1合0\n📝{name or bucket_id}{related_note}"
 
 
+# ---------------------------------------------------------
+# Letter tools — write and read letters
+# 信件工具 —— 写信和读信
+# ---------------------------------------------------------
+
+@mcp.tool()
+async def letter_write(
+    author: str,
+    content: str,
+    user_name: str = "",
+    title: str = "",
+    date: str = "",
+    ai_name: str = "",
+) -> str:
+    """写入一封信。author 必填："user"=用户写的，"ai"=AI写的，也可传任意署名。信件永久保存，不压缩/不合并/不衰减。"""
+    if not author or not author.strip():
+        return "author 不能为空。"
+    if not content or not content.strip():
+        return "信件内容不能为空。"
+
+    ai = (ai_name or "").strip() or os.environ.get("AI_NAME", "AI")
+    raw = author.strip()
+    low = raw.lower()
+    if low == "user":
+        a = "user"
+    elif low in ("ai", "claude") or raw == ai:
+        a = ai
+    else:
+        a = raw
+
+    extra_meta = {"author": a}
+    if user_name.strip():
+        extra_meta["user_name"] = user_name.strip()
+    if title.strip():
+        extra_meta["title"] = title.strip()[:120]
+    if date.strip():
+        extra_meta["letter_date"] = date.strip()
+
+    bucket_id = await bucket_mgr.create(
+        content=content.strip(),
+        tags=["__letter__"],
+        importance=10,
+        domain=["letter"],
+        valence=0.5,
+        arousal=0.3,
+        name=(title.strip()[:60] or f"{a}_{date.strip() or 'letter'}"),
+        bucket_type="letter",
+        extra_metadata=extra_meta,
+    )
+    _queue_embedding_refresh(bucket_id)
+    return f"💌letter→{bucket_id} [{a}]"
+
+
+@mcp.tool()
+async def letter_read(
+    query: str = "",
+    limit: int = 10,
+    author: str = "",
+    date_from: str = "",
+    date_to: str = "",
+) -> str:
+    """检索历史信件。query=语义检索(可选)；author 按署名过滤("user"/"ai")；date_from/date_to=日期范围(可选)。无 query 时按时间倒序返回最近 limit 封。返回完整原文。"""
+    try:
+        limit = max(1, min(50, int(limit)))
+    except (TypeError, ValueError):
+        limit = 10
+    try:
+        all_b = await bucket_mgr.list_all(include_archive=False)
+    except Exception as e:
+        return f"读取信件失败: {e}"
+
+    letters = [b for b in all_b if b.get("metadata", {}).get("type") == "letter"
+               or "__letter__" in (b.get("metadata", {}).get("tags") or [])]
+
+    ai = os.environ.get("AI_NAME", "AI")
+    af = author.strip()
+    if af:
+        af_low = af.lower()
+        if af_low == "user":
+            letters = [b for b in letters if b["metadata"].get("author") == "user"]
+        elif af_low in ("ai", "claude") or af == ai:
+            ai_aliases = {ai, "claude"}
+            letters = [b for b in letters if b["metadata"].get("author") in ai_aliases]
+        else:
+            letters = [b for b in letters if b["metadata"].get("author") == af]
+
+    if date_from or date_to:
+        def _within(b):
+            d = b["metadata"].get("letter_date") or b["metadata"].get("created", "")
+            if date_from and d and d < date_from:
+                return False
+            if date_to and d and d > date_to:
+                return False
+            return True
+        letters = [b for b in letters if _within(b)]
+
+    query_text = query.strip()
+    if query_text:
+        def _matches(b):
+            parts = [
+                b.get("content", ""),
+                str(b["metadata"].get("name") or ""),
+                str(b["metadata"].get("title") or ""),
+                str(b["metadata"].get("author") or ""),
+            ]
+            return query_text.lower() in "\n".join(parts).lower()
+        letters = [b for b in letters if _matches(b)]
+
+    letters.sort(
+        key=lambda b: b["metadata"].get("letter_date") or b["metadata"].get("created", ""),
+        reverse=True,
+    )
+    letters = letters[:limit]
+    if not letters:
+        return "没有找到匹配的信件。"
+
+    parts = []
+    for b in letters:
+        m = b["metadata"]
+        a = m.get("author", "?")
+        d = (m.get("letter_date") or m.get("created", ""))[:10]
+        t = m.get("title") or m.get("name", "")
+        payload = f"[{b['id']}] {a} · {d}{(' · ' + t) if t else ''}\n{b['content']}"
+        parts.append(payload)
+    return "=== 信件 ===\n" + "\n\n---\n\n".join(parts)
+
+
 @mcp.tool()
 async def grow(content: str, auto: bool = False, source: str = "", title: str = "", context: Context | None = None) -> str:
     """把筛过的长片段拆成少量长期记忆；单条事实/承诺/偏好优先 hold，旧记忆补感受优先 comment_bucket。只有多个已筛选长期记忆点才用 grow，别塞整段流水账。保留原文称呼、昵称、互称、自称和原话，不要把临时称呼推成稳定画像事实。title 可选，短内容时传了就用你给的标题。普通记忆 content 的最小写入就是正文；只有确实需要结构化时才按需使用 ### moment、### original、### reflection；reflection 必须写成“我……”第一人称。不要写 ### affect_anchor、### followup 或 ### todo：长期回应变化写进 reflection，到时提醒用 reminder_create。feel 年轮只写第一人称正文，不写标题或任何 Markdown 分段。"""
