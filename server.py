@@ -191,7 +191,7 @@ _gh_token = str(_gh_cfg.get("token") or os.environ.get("GITHUB_SYNC_TOKEN") or "
 _gh_repo = str(_gh_cfg.get("repo") or os.environ.get("GITHUB_SYNC_REPO") or "").strip()
 _gh_branch = str(_gh_cfg.get("branch") or "main").strip()
 _gh_prefix = str(_gh_cfg.get("path_prefix") or "ombre").strip()
-_gh_interval = int(_gh_cfg.get("auto_interval_hours") or 0)
+_gh_interval_minutes = float(_gh_cfg.get("auto_interval_minutes") or 0) or float(_gh_cfg.get("auto_interval_hours") or 0) * 60
 github_sync: GitHubSync | None = None
 if _gh_token and _gh_repo:
     github_sync = GitHubSync(token=_gh_token, repo=_gh_repo, branch=_gh_branch, path_prefix=_gh_prefix)
@@ -4145,10 +4145,10 @@ _github_auto_sync_started = False
 
 
 async def _github_auto_sync_loop():
-    if not github_sync or _gh_interval <= 0:
+    if not github_sync or _gh_interval_minutes <= 0:
         return
-    interval = _gh_interval * 3600
-    logger.info(f"GitHub auto-sync started: every {_gh_interval}h")
+    interval = _gh_interval_minutes * 60
+    logger.info(f"GitHub auto-sync started: every {_gh_interval_minutes:.0f}min")
     while True:
         await asyncio.sleep(interval)
         try:
@@ -4170,7 +4170,7 @@ async def _ensure_decay_engine_started_for_transport(transport_name: str) -> Non
     except Exception as e:
         logger.warning("Decay engine startup failed / 衰减引擎启动失败: %s", e)
     global _github_auto_sync_started
-    if not _github_auto_sync_started and github_sync and _gh_interval > 0:
+    if not _github_auto_sync_started and github_sync and _gh_interval_minutes > 0:
         _github_auto_sync_started = True
         asyncio.create_task(_github_auto_sync_loop())
 

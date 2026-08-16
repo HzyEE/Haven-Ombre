@@ -37,6 +37,17 @@ identity:
   user_aliases:
     - "对方"
 
+# --- GitHub auto-backup / GitHub 自动备份 ---
+# Syncs all memory buckets (.md files) to a GitHub repo via Git Trees API.
+# 将所有记忆桶自动同步到 GitHub 仓库。
+# github_sync:
+#   token: ""                         # GitHub PAT with Contents read/write; or use GITHUB_SYNC_TOKEN env var
+#   repo: "username/repo-name"        # Target repo; or use GITHUB_SYNC_REPO env var
+#   branch: "main"                    # Target branch
+#   path_prefix: "ombre"              # Files stored under this prefix in the repo
+#   auto_interval_minutes: 30         # Auto-sync interval in minutes; 0 = manual only
+#   # auto_interval_hours: 6          # Alternative: interval in hours (auto_interval_minutes takes priority)
+
 # --- Merge threshold / 桶合并阈值 ---
 # When storing a new memory, if similarity with an existing bucket exceeds
 # this value (0-100), merge instead of creating a new one
