@@ -4101,11 +4101,39 @@ async def entity_edge_backfill(
     )
 
 
+async def _auto_reorganize_letters() -> None:
+    """Move letter-type buckets to the letters/ directory on startup."""
+    try:
+        os.makedirs(bucket_mgr.letters_dir, exist_ok=True)
+        all_buckets = await bucket_mgr.list_all(include_archive=False)
+        moved = 0
+        for b in all_buckets:
+            m = b.get("metadata", {})
+            is_letter = (m.get("type") == "letter"
+                         or "__letter__" in (m.get("tags") or [])
+                         or "letter" in (m.get("domain") or []))
+            if not is_letter:
+                continue
+            file_path = b.get("file_path", "")
+            if not file_path or "/letters/" in file_path:
+                continue
+            domain = m.get("domain", ["letter"])
+            if m.get("type") != "letter":
+                await bucket_mgr.update(b["id"], type="letter")
+            bucket_mgr._move_bucket(file_path, bucket_mgr.letters_dir, domain)
+            moved += 1
+        if moved:
+            logger.info(f"Auto-reorganized {moved} letter(s) to letters/ directory")
+    except Exception as e:
+        logger.warning(f"Letter auto-reorganize failed: {e}")
+
+
 async def _ensure_decay_engine_started_for_transport(transport_name: str) -> None:
     if transport_name not in ("sse", "streamable-http"):
         return
     try:
         await decay_engine.ensure_started()
+        await _auto_reorganize_letters()
     except Exception as e:
         logger.warning("Decay engine startup failed / 衰减引擎启动失败: %s", e)
 
@@ -9920,6 +9948,36 @@ async def api_letters(request):
                 "user_name": m.get("user_name", ""),
             })
         return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/letters/reorganize", methods=["POST"])
+async def api_letters_reorganize(request):
+    """Move letter-type buckets from dynamic/permanent dirs to letters dir."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        all_buckets = await bucket_mgr.list_all(include_archive=False)
+        moved = 0
+        for b in all_buckets:
+            m = b.get("metadata", {})
+            is_letter = (m.get("type") == "letter"
+                         or "__letter__" in (m.get("tags") or [])
+                         or "letter" in (m.get("domain") or []))
+            if not is_letter:
+                continue
+            file_path = b.get("file_path", "")
+            if not file_path or "/letters/" in file_path:
+                continue
+            domain = m.get("domain", ["letter"])
+            if m.get("type") != "letter":
+                await bucket_mgr.update(b["id"], type="letter")
+            bucket_mgr._move_bucket(file_path, bucket_mgr.letters_dir, domain)
+            moved += 1
+        return JSONResponse({"moved": moved})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
