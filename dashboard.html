@@ -2843,8 +2843,7 @@
   <div class="tab" data-tab="memory-config">记忆浮现</div>
   <div class="tab" data-tab="letters">信件</div>
   <div class="tab" data-tab="health">健康</div>
-  <div class="tab" data-tab="import">导入</div>
-  <div class="tab" data-tab="backup">备份与迁移</div>
+  <div class="tab" data-tab="data">数据管理</div>
 </div>
 
 <div class="content" id="list-view">
@@ -3406,7 +3405,7 @@
   </div>
 </div>
 
-<div class="content" id="import-view" style="display:none">
+<div class="content" id="data-view" style="display:none">
   <div style="max-width:720px;margin:0 auto;">
     <h3>历史对话 / Operit 记忆导入</h3>
     <p style="color:var(--text-dim);font-size:13px;">支持 Claude JSON、ChatGPT 导出、DeepSeek、Markdown、纯文本，以及 Operit 记忆备份 JSON</p>
@@ -3472,48 +3471,9 @@
     <h3>高频模式检测</h3>
     <button onclick="detectPatterns()">🔍 检测高频模式</button>
     <div id="import-patterns" style="margin-top:16px;"></div>
-  </div>
-</div>
 
-<div class="content" id="letters-view" style="display:none">
-  <div style="max-width:720px;margin:0 auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 style="margin:0;">信件</h3>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <select id="letter-filter-author" onchange="loadLetters()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
-          <option value="">全部</option>
-          <option value="ai">AI 写的</option>
-          <option value="user">用户写的</option>
-        </select>
-        <button class="btn-secondary" onclick="loadLetters()" style="font-size:13px;">刷新</button>
-      </div>
-    </div>
-    <div id="letters-list" style="display:flex;flex-direction:column;gap:16px;"></div>
-    <div id="letters-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
-      <div style="font-size:32px;margin-bottom:8px;">💌</div>
-      <div>还没有信件</div>
-    </div>
-  </div>
-</div>
+    <hr style="border:none;border-top:2px solid var(--border);margin:40px 0;">
 
-<div class="content" id="health-view" style="display:none">
-  <div style="max-width:720px;margin:0 auto;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 style="margin:0;">记忆健康</h3>
-      <button class="btn-secondary" onclick="loadDuplicates()" style="font-size:13px;">刷新</button>
-    </div>
-    <h4 style="margin:16px 0 8px;">疑似重复桶</h4>
-    <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px;">向量相似度 &gt; 0.95 的桶对，由 hold/grow 写入时自动标记</p>
-    <div id="dup-list" style="display:flex;flex-direction:column;gap:12px;"></div>
-    <div id="dup-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
-      <div style="font-size:32px;margin-bottom:8px;">✅</div>
-      <div>没有发现重复桶</div>
-    </div>
-  </div>
-</div>
-
-<div class="content" id="backup-view" style="display:none">
-  <div style="max-width:720px;margin:0 auto;">
     <h3>数据备份</h3>
     <p style="color:var(--text-dim);font-size:13px;">导出所有记忆桶为 ZIP 文件（包含 dynamic / permanent / feel / archive / letters / plans 及向量数据库）</p>
     <button class="btn-primary" onclick="downloadExport()" style="margin:16px 0;">📦 导出为 ZIP</button>
@@ -3571,6 +3531,43 @@
     </div>
     <div id="github-sync-status" style="margin:8px 0;padding:12px 16px;border-radius:8px;background:var(--surface);font-size:13px;"></div>
     <div id="github-sync-result" style="margin-top:8px;font-size:13px;color:var(--text-dim);"></div>
+  </div>
+</div>
+
+<div class="content" id="letters-view" style="display:none">
+  <div style="max-width:720px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;">信件</h3>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <select id="letter-filter-author" onchange="loadLetters()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;">
+          <option value="">全部</option>
+          <option value="ai">AI 写的</option>
+          <option value="user">用户写的</option>
+        </select>
+        <button class="btn-secondary" onclick="loadLetters()" style="font-size:13px;">刷新</button>
+      </div>
+    </div>
+    <div id="letters-list" style="display:flex;flex-direction:column;gap:16px;"></div>
+    <div id="letters-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
+      <div style="font-size:32px;margin-bottom:8px;">💌</div>
+      <div>还没有信件</div>
+    </div>
+  </div>
+</div>
+
+<div class="content" id="health-view" style="display:none">
+  <div style="max-width:720px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;">记忆健康</h3>
+      <button class="btn-secondary" onclick="loadDuplicates()" style="font-size:13px;">刷新</button>
+    </div>
+    <h4 style="margin:16px 0 8px;">疑似重复桶</h4>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px;">向量相似度 &gt; 0.95 的桶对，由 hold/grow 写入时自动标记</p>
+    <div id="dup-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+    <div id="dup-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
+      <div style="font-size:32px;margin-bottom:8px;">✅</div>
+      <div>没有发现重复桶</div>
+    </div>
   </div>
 </div>
 
@@ -4080,11 +4077,10 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('model-config-view').style.display = target === 'model-config' ? '' : 'none';
     document.getElementById('letters-view').style.display = target === 'letters' ? '' : 'none';
     document.getElementById('health-view').style.display = target === 'health' ? '' : 'none';
-    document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
-    document.getElementById('backup-view').style.display = target === 'backup' ? '' : 'none';
+    document.getElementById('data-view').style.display = target === 'data' ? '' : 'none';
     if (target === 'letters') loadLetters();
     if (target === 'health') loadDuplicates();
-    if (target === 'backup') loadGithubStatus();
+    if (target === 'data') loadGithubStatus();
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
     if (target === 'memory-config') loadConfig();
@@ -4101,7 +4097,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     if (target === 'config') loadConfig();
     if (target === 'upstream-config') loadConfig();
     if (target === 'model-config') loadConfig();
-    if (target === 'import') { pollImportStatus(); loadImportResults(); }
+    if (target === 'data') { pollImportStatus(); loadImportResults(); }
   });
 });
 
