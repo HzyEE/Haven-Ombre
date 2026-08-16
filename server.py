@@ -184,6 +184,19 @@ gateway_state_store = GatewayStateStore(os.path.join(config["buckets_dir"], "gat
 raw_event_store = RawEventStore(config)                  # Raw dialogue archive / 原文保险箱
 reminder_store = ReminderStore(config)                    # Standalone care memos / 独立照顾备忘
 
+# --- GitHub sync (optional) / GitHub 同步（可选）---
+from github_sync import GitHubSync
+_gh_cfg = config.get("github_sync", {}) if isinstance(config.get("github_sync"), dict) else {}
+_gh_token = str(_gh_cfg.get("token") or os.environ.get("GITHUB_SYNC_TOKEN") or "").strip()
+_gh_repo = str(_gh_cfg.get("repo") or os.environ.get("GITHUB_SYNC_REPO") or "").strip()
+_gh_branch = str(_gh_cfg.get("branch") or "main").strip()
+_gh_prefix = str(_gh_cfg.get("path_prefix") or "ombre").strip()
+_gh_interval = int(_gh_cfg.get("auto_interval_hours") or 0)
+github_sync: GitHubSync | None = None
+if _gh_token and _gh_repo:
+    github_sync = GitHubSync(token=_gh_token, repo=_gh_repo, branch=_gh_branch, path_prefix=_gh_prefix)
+    logger.info(f"GitHub sync configured: {_gh_repo} ({_gh_branch})")
+
 # --- Create MCP server instance / 创建 MCP 服务器实例 ---
 # host="0.0.0.0" so Docker container's SSE is externally reachable
 # stdio mode ignores host (no network)
@@ -4128,6 +4141,26 @@ async def _auto_reorganize_letters() -> None:
         logger.warning(f"Letter auto-reorganize failed: {e}")
 
 
+_github_auto_sync_started = False
+
+
+async def _github_auto_sync_loop():
+    if not github_sync or _gh_interval <= 0:
+        return
+    interval = _gh_interval * 3600
+    logger.info(f"GitHub auto-sync started: every {_gh_interval}h")
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            result = await github_sync.sync(config["buckets_dir"])
+            if result.get("ok"):
+                logger.info(f"GitHub auto-sync ok: {result.get('uploaded', 0)} files")
+            else:
+                logger.warning(f"GitHub auto-sync failed: {result.get('error', '?')}")
+        except Exception as e:
+            logger.error(f"GitHub auto-sync error: {e}")
+
+
 async def _ensure_decay_engine_started_for_transport(transport_name: str) -> None:
     if transport_name not in ("sse", "streamable-http"):
         return
@@ -4136,6 +4169,46 @@ async def _ensure_decay_engine_started_for_transport(transport_name: str) -> Non
         await _auto_reorganize_letters()
     except Exception as e:
         logger.warning("Decay engine startup failed / 衰减引擎启动失败: %s", e)
+    global _github_auto_sync_started
+    if not _github_auto_sync_started and github_sync and _gh_interval > 0:
+        _github_auto_sync_started = True
+        asyncio.create_task(_github_auto_sync_loop())
+
+
+_DUP_DEFAULT_THRESHOLD = 0.95
+_DUP_TOPK = 10
+_DUP_CHECK_CONCURRENCY = 4
+_dup_check_semaphore = asyncio.Semaphore(_DUP_CHECK_CONCURRENCY)
+
+
+async def _check_duplicate_for(
+    new_bucket_id: str, new_text: str, threshold: float = _DUP_DEFAULT_THRESHOLD
+) -> None:
+    async with _dup_check_semaphore:
+        try:
+            if not getattr(embedding_engine, "enabled", False):
+                return
+            sims = await embedding_engine.search_similar(new_text, top_k=_DUP_TOPK)
+            for bid, score in sims:
+                if bid == new_bucket_id:
+                    continue
+                if score < threshold:
+                    continue
+                try:
+                    await bucket_mgr.update(
+                        new_bucket_id,
+                        extra_metadata={"dup_candidate": bid, "dup_score": round(float(score), 4)},
+                    )
+                    await bucket_mgr.update(
+                        bid,
+                        extra_metadata={"dup_candidate": new_bucket_id, "dup_score": round(float(score), 4)},
+                    )
+                    logger.info(f"duplicate candidate: {new_bucket_id} ↔ {bid} (sim={score:.3f})")
+                except Exception as e:
+                    logger.warning(f"dup mark failed: {e}")
+                break
+        except Exception as e:
+            logger.warning(f"check_duplicate_for error: {e}")
 
 
 async def _merge_or_create(
@@ -8550,6 +8623,7 @@ async def hold(
         )
         _queue_embedding_refresh(bucket_id)
         _queue_memory_enrichment(bucket_id)
+        asyncio.create_task(_check_duplicate_for(bucket_id, content))
         related_note = _format_readonly_related_memory(related_bucket) if related_bucket else ""
         return f"📌钉选→{bucket_id} {','.join(domain)}{related_note}"
 
@@ -8569,6 +8643,7 @@ async def hold(
         date=event_date,
     )
     _queue_memory_enrichment(bucket_id)
+    asyncio.create_task(_check_duplicate_for(bucket_id, content))
 
     action = "合并→" if is_merged else "新建→"
     related_note = _format_readonly_related_memory(related_bucket) if related_bucket else ""
@@ -8936,6 +9011,7 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
             memory_classification_source=fast_classification["memory_classification_source"],
         )
         _queue_memory_enrichment(bucket_id)
+        asyncio.create_task(_check_duplicate_for(bucket_id, content))
         action = "合并" if is_merged else "新建"
         related_note = _format_readonly_related_memory(related_bucket) if related_bucket else ""
         return f"{gate_prefix}{action} → {result_name} | {','.join(analysis.get('domain', []))} V{analysis.get('valence', 0.5):.1f}/A{analysis.get('arousal', 0.3):.1f}{related_note}"
@@ -8992,6 +9068,7 @@ async def grow(content: str, auto: bool = False, source: str = "", title: str = 
                 memory_classification_source=item_classification["memory_classification_source"],
             )
             _queue_memory_enrichment(bucket_id)
+            asyncio.create_task(_check_duplicate_for(bucket_id, item_content))
 
             if is_merged:
                 results.append(f"📎{result_name}")
@@ -10018,6 +10095,88 @@ async def api_letters_reorganize(request):
         return JSONResponse({"moved": moved})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/duplicates", methods=["GET"])
+async def api_duplicates(request):
+    """List bucket pairs flagged as duplicate candidates."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        all_b = await bucket_mgr.list_all(include_archive=False)
+        seen: set[frozenset] = set()
+        pairs: list[dict] = []
+        index = {b["id"]: b for b in all_b}
+        for b in all_b:
+            meta = b.get("metadata", {}) or {}
+            other_id = meta.get("dup_candidate")
+            if not other_id or other_id not in index:
+                continue
+            key = frozenset((b["id"], other_id))
+            if key in seen:
+                continue
+            seen.add(key)
+            other = index[other_id]
+            pairs.append({
+                "a": {"id": b["id"], "name": meta.get("name", b["id"]),
+                       "preview": _bucket_context_snippet(b, 120)},
+                "b": {"id": other_id, "name": other["metadata"].get("name", other_id),
+                       "preview": _bucket_context_snippet(other, 120)},
+                "score": meta.get("dup_score") or other["metadata"].get("dup_score"),
+            })
+        pairs.sort(key=lambda p: p.get("score") or 0, reverse=True)
+        return JSONResponse({"pairs": pairs, "total": len(pairs)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/github/status", methods=["GET"])
+async def api_github_status(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    if not github_sync:
+        return JSONResponse({"enabled": False})
+    return JSONResponse(github_sync.status())
+
+
+@mcp.custom_route("/api/github/validate", methods=["POST"])
+async def api_github_validate(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    if not github_sync:
+        return JSONResponse({"ok": False, "error": "GitHub sync not configured"}, status_code=400)
+    result = await github_sync.validate()
+    return JSONResponse(result)
+
+
+@mcp.custom_route("/api/github/sync", methods=["POST"])
+async def api_github_sync(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    if not github_sync:
+        return JSONResponse({"ok": False, "error": "GitHub sync not configured"}, status_code=400)
+    result = await github_sync.sync(config["buckets_dir"])
+    return JSONResponse(result)
+
+
+@mcp.custom_route("/api/github/import", methods=["POST"])
+async def api_github_import(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    if not github_sync:
+        return JSONResponse({"ok": False, "error": "GitHub sync not configured"}, status_code=400)
+    result = await github_sync.import_from_github(config["buckets_dir"])
+    return JSONResponse(result)
 
 
 @mcp.custom_route("/api/buckets/light", methods=["GET"])

@@ -2842,6 +2842,7 @@
   <div class="tab" data-tab="model-config">模型配置</div>
   <div class="tab" data-tab="memory-config">记忆浮现</div>
   <div class="tab" data-tab="letters">信件</div>
+  <div class="tab" data-tab="health">健康</div>
   <div class="tab" data-tab="import">导入</div>
   <div class="tab" data-tab="backup">备份与迁移</div>
 </div>
@@ -3495,6 +3496,22 @@
   </div>
 </div>
 
+<div class="content" id="health-view" style="display:none">
+  <div style="max-width:720px;margin:0 auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;">记忆健康</h3>
+      <button class="btn-secondary" onclick="loadDuplicates()" style="font-size:13px;">刷新</button>
+    </div>
+    <h4 style="margin:16px 0 8px;">疑似重复桶</h4>
+    <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px;">向量相似度 &gt; 0.95 的桶对，由 hold/grow 写入时自动标记</p>
+    <div id="dup-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+    <div id="dup-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
+      <div style="font-size:32px;margin-bottom:8px;">✅</div>
+      <div>没有发现重复桶</div>
+    </div>
+  </div>
+</div>
+
 <div class="content" id="backup-view" style="display:none">
   <div style="max-width:720px;margin:0 auto;">
     <h3>数据备份</h3>
@@ -3518,6 +3535,20 @@
     </div>
 
     <div id="migrate-status" style="display:none;margin:16px 0;padding:12px 16px;border-radius:8px;font-size:13px;"></div>
+
+    <hr style="border:none;border-top:1px solid var(--border);margin:32px 0;">
+
+    <h3>GitHub 自动备份</h3>
+    <p style="color:var(--text-dim);font-size:13px;">通过 GitHub 仓库定期同步备份记忆数据（需在配置文件或环境变量中设置 token 和仓库）</p>
+    <div id="github-sync-status" style="margin:16px 0;padding:12px 16px;border-radius:8px;background:var(--surface);font-size:13px;">
+      加载中…
+    </div>
+    <div style="display:flex;gap:8px;margin:12px 0;">
+      <button class="btn-secondary" onclick="githubValidate()" style="font-size:13px;">验证连接</button>
+      <button class="btn-primary" onclick="githubSync()" style="font-size:13px;">立即同步</button>
+      <button class="btn-secondary" onclick="githubImport()" style="font-size:13px;">从 GitHub 恢复</button>
+    </div>
+    <div id="github-sync-result" style="margin-top:8px;font-size:13px;color:var(--text-dim);"></div>
   </div>
 </div>
 
@@ -4026,9 +4057,12 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('upstream-config-view').style.display = target === 'upstream-config' ? '' : 'none';
     document.getElementById('model-config-view').style.display = target === 'model-config' ? '' : 'none';
     document.getElementById('letters-view').style.display = target === 'letters' ? '' : 'none';
+    document.getElementById('health-view').style.display = target === 'health' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
     document.getElementById('backup-view').style.display = target === 'backup' ? '' : 'none';
     if (target === 'letters') loadLetters();
+    if (target === 'health') loadDuplicates();
+    if (target === 'backup') loadGithubStatus();
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
     if (target === 'memory-config') loadConfig();
@@ -9077,6 +9111,43 @@ async function loadLetters() {
   }
 }
 
+async function loadDuplicates() {
+  const listEl = document.getElementById('dup-list');
+  const emptyEl = document.getElementById('dup-empty');
+  listEl.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px;">加载中…</div>';
+  emptyEl.style.display = 'none';
+  try {
+    const res = await fetch(authUrl('/api/duplicates'));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.pairs || !data.pairs.length) {
+      listEl.innerHTML = '';
+      emptyEl.style.display = '';
+      return;
+    }
+    listEl.innerHTML = data.pairs.map(function(p) {
+      const score = p.score ? (p.score * 100).toFixed(1) + '%' : '?';
+      return '<div style="border:1px solid var(--border);border-radius:12px;padding:16px;background:var(--card-bg);">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+          '<span style="font-size:12px;color:var(--text-dim);">相似度 ' + score + '</span>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
+          '<div style="padding:10px;border-radius:8px;background:var(--surface);font-size:13px;">' +
+            '<div style="font-weight:600;margin-bottom:4px;">' + (p.a.name || p.a.id) + '</div>' +
+            '<div style="color:var(--text-dim);font-size:12px;line-height:1.5;">' + (p.a.preview || '').replace(/</g,'&lt;') + '</div>' +
+          '</div>' +
+          '<div style="padding:10px;border-radius:8px;background:var(--surface);font-size:13px;">' +
+            '<div style="font-weight:600;margin-bottom:4px;">' + (p.b.name || p.b.id) + '</div>' +
+            '<div style="color:var(--text-dim);font-size:12px;line-height:1.5;">' + (p.b.preview || '').replace(/</g,'&lt;') + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch(e) {
+    listEl.innerHTML = '<div style="color:var(--negative);padding:20px;">加载失败: ' + e.message + '</div>';
+  }
+}
+
 function downloadExport() {
   const st = document.getElementById('export-status');
   st.textContent = '正在生成 ZIP…';
@@ -9117,6 +9188,69 @@ async function handleMigrateFile(file) {
     st.style.color = 'var(--negative)';
     st.textContent = '上传失败: ' + e.message;
   }
+}
+
+async function loadGithubStatus() {
+  const st = document.getElementById('github-sync-status');
+  try {
+    const res = await fetch(authUrl('/api/github/status'));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.enabled) {
+      st.innerHTML = '未配置 — 在 config.yaml 或环境变量中设置 GITHUB_SYNC_TOKEN 和 GITHUB_SYNC_REPO';
+      return;
+    }
+    const statusColor = data.last_status === 'ok' ? 'var(--positive)' : data.last_status === 'error' ? 'var(--negative)' : 'var(--text-dim)';
+    st.innerHTML = '<div>仓库: <strong>' + data.repo + '</strong> (' + data.branch + ')</div>' +
+      '<div>状态: <span style="color:' + statusColor + ';">' + data.last_status + '</span>' +
+      (data.last_sync ? ' · 上次同步: ' + data.last_sync : '') +
+      (data.last_count ? ' · ' + data.last_count + ' 文件' : '') +
+      (data.consecutive_failures > 0 ? ' · 连续失败 ' + data.consecutive_failures + ' 次' : '') +
+      '</div>' +
+      (data.last_error ? '<div style="color:var(--negative);margin-top:4px;">' + data.last_error + '</div>' : '');
+  } catch(e) {
+    st.textContent = '加载失败: ' + e.message;
+  }
+}
+
+async function githubValidate() {
+  const r = document.getElementById('github-sync-result');
+  r.textContent = '验证中…';
+  try {
+    const res = await authFetch(BASE + '/api/github/validate', { method: 'POST' });
+    if (!res) { r.textContent = '认证失败'; return; }
+    const data = await res.json();
+    r.style.color = data.ok ? 'var(--positive)' : 'var(--negative)';
+    r.textContent = data.ok ? '连接成功: ' + data.repo_full_name + (data.private ? ' (私有)' : '') : '失败: ' + data.error;
+  } catch(e) { r.style.color = 'var(--negative)'; r.textContent = '验证失败: ' + e.message; }
+}
+
+async function githubSync() {
+  const r = document.getElementById('github-sync-result');
+  r.style.color = 'var(--text-dim)';
+  r.textContent = '同步中…';
+  try {
+    const res = await authFetch(BASE + '/api/github/sync', { method: 'POST' });
+    if (!res) { r.textContent = '认证失败'; return; }
+    const data = await res.json();
+    r.style.color = data.ok ? 'var(--positive)' : 'var(--negative)';
+    r.textContent = data.ok ? '同步成功: ' + (data.uploaded || 0) + ' 个文件' : '同步失败: ' + (data.error || '未知错误');
+    loadGithubStatus();
+  } catch(e) { r.style.color = 'var(--negative)'; r.textContent = '同步失败: ' + e.message; }
+}
+
+async function githubImport() {
+  if (!confirm('从 GitHub 恢复会覆盖同名本地文件，确定继续？')) return;
+  const r = document.getElementById('github-sync-result');
+  r.style.color = 'var(--text-dim)';
+  r.textContent = '恢复中…';
+  try {
+    const res = await authFetch(BASE + '/api/github/import', { method: 'POST' });
+    if (!res) { r.textContent = '认证失败'; return; }
+    const data = await res.json();
+    r.style.color = data.ok ? 'var(--positive)' : 'var(--negative)';
+    r.textContent = data.ok ? '恢复成功: ' + (data.imported || 0) + ' 个文件' + (data.skipped ? ', 跳过 ' + data.skipped : '') : '恢复失败: ' + (data.error || '未知错误');
+  } catch(e) { r.style.color = 'var(--negative)'; r.textContent = '恢复失败: ' + e.message; }
 }
 
 function loadDashboardModule(path) {
