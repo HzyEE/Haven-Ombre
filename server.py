@@ -7490,6 +7490,44 @@ async def breath(
                 logger.warning(f"Failed to dehydrate surfaced bucket / 浮现脱水失败: {e}")
                 continue
 
+        # --- Random low-weight memory slots for diversity ---
+        if token_budget > 0 and scored:
+            surfaced_ids = {b["id"] for b in surfaced_buckets}
+            core_ids = {b["id"] for b in selected_core}
+            anchor_ids = {b["id"] for b in selected_anchors}
+            excluded_ids = surfaced_ids | core_ids | anchor_ids
+            unsurfaced = [b for b in scored if b["id"] not in excluded_ids]
+            if unsurfaced:
+                min_score = 0.5
+                eligible = [
+                    b for b in unsurfaced
+                    if decay_engine.calculate_score(b["metadata"]) >= min_score
+                ]
+                if len(eligible) > 4:
+                    low_pool = eligible[len(eligible) // 3:]
+                else:
+                    low_pool = eligible
+                random_picks = random.sample(low_pool, min(2, len(low_pool))) if low_pool else []
+                for b in random_picks:
+                    if token_budget <= 0:
+                        break
+                    try:
+                        clean_meta = {k: v for k, v in b["metadata"].items() if k != "tags"}
+                        summary = await dehydrator.dehydrate(_bucket_text_for_embedding(b), clean_meta)
+                        score = decay_engine.calculate_score(b["metadata"])
+                        entry = f"[随机浮现] [权重:{score:.2f}] [bucket_id:{b['id']}] {summary}"
+                        entry_tokens = count_tokens_approx(entry)
+                        if entry_tokens > token_budget:
+                            break
+                        dynamic_results.append(entry)
+                        surfaced_buckets.append(b)
+                        token_budget -= entry_tokens
+                    except Exception as e:
+                        logger.warning(f"Failed to dehydrate random bucket: {e}")
+                        continue
+                if random_picks:
+                    logger.info(f"Diversity slots: surfaced {len([1 for b in random_picks if b in surfaced_buckets])} random low-weight memories")
+
         related_block = ""
         related_sources = anchor_buckets + surfaced_buckets
         if include_related and related_sources:
