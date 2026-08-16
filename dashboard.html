@@ -4004,6 +4004,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('upstream-config-view').style.display = target === 'upstream-config' ? '' : 'none';
     document.getElementById('model-config-view').style.display = target === 'model-config' ? '' : 'none';
     document.getElementById('import-view').style.display = target === 'import' ? '' : 'none';
+    document.getElementById('backup-view').style.display = target === 'backup' ? '' : 'none';
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
     if (target === 'memory-config') loadConfig();
