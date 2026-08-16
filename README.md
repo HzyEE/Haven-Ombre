@@ -18,6 +18,11 @@ Ombre Brain 是一套以 Markdown 记忆桶为长期真源、同时提供 MCP �
 
 本 fork 在 Haven/Rain 基础上增加了以下改动：
 
+### 0. 部署与依赖修复
+
+- **mcp 版本锁定**：`requirements.txt` 中将 `mcp` 锁定到 `<2.0.0`，避免新版 API 不兼容导致 `fastmcp` 导入失败。
+- **start.sh 与 Dockerfile**：新增 `start.sh` 启动脚本，Dockerfile 改为同时运行 Brain 和 Gateway；`wait -n` 替换为 polling loop 以兼容更多 shell 环境。
+
 ### 1. `always_surface` 与 `pinned/protected` 分离
 
 原版中 `pinned` 和 `protected` 的桶在 `breath()` 浮现时总是出现在核心区，占据大量 token。拆分后：
