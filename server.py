@@ -186,16 +186,63 @@ reminder_store = ReminderStore(config)                    # Standalone care memo
 
 # --- GitHub sync (optional) / GitHub 同步（可选）---
 from github_sync import GitHubSync
-_gh_cfg = config.get("github_sync", {}) if isinstance(config.get("github_sync"), dict) else {}
-_gh_token = str(_gh_cfg.get("token") or os.environ.get("GITHUB_SYNC_TOKEN") or "").strip()
-_gh_repo = str(_gh_cfg.get("repo") or os.environ.get("GITHUB_SYNC_REPO") or "").strip()
-_gh_branch = str(_gh_cfg.get("branch") or "main").strip()
-_gh_prefix = str(_gh_cfg.get("path_prefix") or "ombre").strip()
-_gh_interval_minutes = float(_gh_cfg.get("auto_interval_minutes") or 0) or float(_gh_cfg.get("auto_interval_hours") or 0) * 60
-github_sync: GitHubSync | None = None
-if _gh_token and _gh_repo:
-    github_sync = GitHubSync(token=_gh_token, repo=_gh_repo, branch=_gh_branch, path_prefix=_gh_prefix)
-    logger.info(f"GitHub sync configured: {_gh_repo} ({_gh_branch})")
+
+def _gh_config_path() -> str:
+    state_dir = config.get("state_dir") or os.path.join(
+        os.path.dirname(os.path.abspath(config.get("buckets_dir", "buckets"))), "state"
+    )
+    os.makedirs(state_dir, exist_ok=True)
+    return os.path.join(state_dir, "github_sync_config.json")
+
+def _load_gh_config() -> dict:
+    cfg = config.get("github_sync", {}) if isinstance(config.get("github_sync"), dict) else {}
+    result = {
+        "token": str(cfg.get("token") or os.environ.get("GITHUB_SYNC_TOKEN") or "").strip(),
+        "repo": str(cfg.get("repo") or os.environ.get("GITHUB_SYNC_REPO") or "").strip(),
+        "branch": str(cfg.get("branch") or "main").strip(),
+        "path_prefix": str(cfg.get("path_prefix") or "ombre").strip(),
+        "auto_interval_minutes": float(cfg.get("auto_interval_minutes") or 0) or float(cfg.get("auto_interval_hours") or 0) * 60,
+    }
+    try:
+        p = _gh_config_path()
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            if saved.get("token"):
+                result["token"] = str(saved["token"]).strip()
+            if saved.get("repo"):
+                result["repo"] = str(saved["repo"]).strip()
+            if saved.get("branch"):
+                result["branch"] = str(saved["branch"]).strip()
+            if saved.get("path_prefix"):
+                result["path_prefix"] = str(saved["path_prefix"]).strip()
+            if saved.get("auto_interval_minutes"):
+                result["auto_interval_minutes"] = float(saved["auto_interval_minutes"])
+    except Exception as e:
+        logging.getLogger("ombre_brain").warning(f"Failed to load github_sync_config.json: {e}")
+    return result
+
+def _save_gh_config(cfg: dict) -> None:
+    p = _gh_config_path()
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def _init_github_sync(cfg: dict) -> GitHubSync | None:
+    token = cfg.get("token", "")
+    repo = cfg.get("repo", "")
+    if token and repo:
+        return GitHubSync(
+            token=token, repo=repo,
+            branch=cfg.get("branch", "main"),
+            path_prefix=cfg.get("path_prefix", "ombre"),
+        )
+    return None
+
+_gh_config = _load_gh_config()
+_gh_interval_minutes = _gh_config["auto_interval_minutes"]
+github_sync: GitHubSync | None = _init_github_sync(_gh_config)
+if github_sync:
+    logger.info(f"GitHub sync configured: {_gh_config['repo']} ({_gh_config['branch']})")
 
 # --- Create MCP server instance / 创建 MCP 服务器实例 ---
 # host="0.0.0.0" so Docker container's SSE is externally reachable
@@ -10138,9 +10185,51 @@ async def api_github_status(request):
     err = _require_dashboard_auth(request)
     if err:
         return err
-    if not github_sync:
-        return JSONResponse({"enabled": False})
-    return JSONResponse(github_sync.status())
+    cfg = _load_gh_config()
+    result = {
+        "enabled": bool(github_sync),
+        "config": {
+            "repo": cfg.get("repo", ""),
+            "branch": cfg.get("branch", "main"),
+            "path_prefix": cfg.get("path_prefix", "ombre"),
+            "auto_interval_minutes": cfg.get("auto_interval_minutes", 0),
+            "has_token": bool(cfg.get("token")),
+        },
+    }
+    if github_sync:
+        result.update(github_sync.status())
+    return JSONResponse(result)
+
+
+@mcp.custom_route("/api/github/config", methods=["POST"])
+async def api_github_config_save(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        body = await request.json()
+        existing = _load_gh_config()
+        new_cfg = {
+            "token": str(body.get("token") or "").strip() or existing.get("token", ""),
+            "repo": str(body.get("repo") or "").strip(),
+            "branch": str(body.get("branch") or "main").strip(),
+            "path_prefix": str(body.get("path_prefix") or "ombre").strip(),
+            "auto_interval_minutes": max(0, float(body.get("auto_interval_minutes") or 0)),
+        }
+        if not new_cfg["token"] or not new_cfg["repo"]:
+            return JSONResponse({"ok": False, "error": "token 和 repo 不能为空"}, status_code=400)
+        _save_gh_config(new_cfg)
+        global github_sync, _gh_interval_minutes
+        github_sync = _init_github_sync(new_cfg)
+        _gh_interval_minutes = new_cfg["auto_interval_minutes"]
+        if github_sync:
+            val_result = await github_sync.validate()
+            if not val_result.get("ok"):
+                return JSONResponse({"ok": False, "error": f"连接验证失败: {val_result.get('error', '?')}"})
+        return JSONResponse({"ok": True, "message": "配置已保存"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @mcp.custom_route("/api/github/validate", methods=["POST"])

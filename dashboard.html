@@ -3539,15 +3539,37 @@
     <hr style="border:none;border-top:1px solid var(--border);margin:32px 0;">
 
     <h3>GitHub 自动备份</h3>
-    <p style="color:var(--text-dim);font-size:13px;">通过 GitHub 仓库定期同步备份记忆数据（需在配置文件或环境变量中设置 token 和仓库）</p>
-    <div id="github-sync-status" style="margin:16px 0;padding:12px 16px;border-radius:8px;background:var(--surface);font-size:13px;">
-      加载中…
+    <p style="color:var(--text-dim);font-size:13px;">通过 GitHub 仓库定期同步备份记忆数据</p>
+    <div style="display:flex;flex-direction:column;gap:12px;margin:16px 0;max-width:480px;">
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">GitHub Token (PAT)</label>
+        <input type="password" id="gh-token" placeholder="ghp_xxxx 或 github_pat_xxxx" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box;">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">仓库 (owner/repo)</label>
+        <input type="text" id="gh-repo" placeholder="HzyEE/ombre-backup" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+        <div>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">分支</label>
+          <input type="text" id="gh-branch" value="main" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">路径前缀</label>
+          <input type="text" id="gh-prefix" value="ombre" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">自动间隔(分钟)</label>
+          <input type="number" id="gh-interval" value="30" min="0" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-primary" onclick="githubSaveConfig()" style="font-size:13px;">保存配置</button>
+        <button class="btn-secondary" onclick="githubSync()" style="font-size:13px;">立即同步</button>
+        <button class="btn-secondary" onclick="githubImport()" style="font-size:13px;">从 GitHub 恢复</button>
+      </div>
     </div>
-    <div style="display:flex;gap:8px;margin:12px 0;">
-      <button class="btn-secondary" onclick="githubValidate()" style="font-size:13px;">验证连接</button>
-      <button class="btn-primary" onclick="githubSync()" style="font-size:13px;">立即同步</button>
-      <button class="btn-secondary" onclick="githubImport()" style="font-size:13px;">从 GitHub 恢复</button>
-    </div>
+    <div id="github-sync-status" style="margin:8px 0;padding:12px 16px;border-radius:8px;background:var(--surface);font-size:13px;"></div>
     <div id="github-sync-result" style="margin-top:8px;font-size:13px;color:var(--text-dim);"></div>
   </div>
 </div>
@@ -9196,16 +9218,21 @@ async function loadGithubStatus() {
     const res = await fetch(authUrl('/api/github/status'));
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
+    var cfg = data.config || {};
+    if (cfg.has_token) document.getElementById('gh-token').placeholder = '已配置（留空保持不变）';
+    if (cfg.repo) document.getElementById('gh-repo').value = cfg.repo;
+    if (cfg.branch) document.getElementById('gh-branch').value = cfg.branch;
+    if (cfg.path_prefix) document.getElementById('gh-prefix').value = cfg.path_prefix;
+    if (cfg.auto_interval_minutes) document.getElementById('gh-interval').value = cfg.auto_interval_minutes;
     if (!data.enabled) {
-      st.innerHTML = '未配置 — 在 config.yaml 或环境变量中设置 GITHUB_SYNC_TOKEN 和 GITHUB_SYNC_REPO';
+      st.innerHTML = '未配置 — 请填写 Token 和仓库后保存';
       return;
     }
-    const statusColor = data.last_status === 'ok' ? 'var(--positive)' : data.last_status === 'error' ? 'var(--negative)' : 'var(--text-dim)';
-    st.innerHTML = '<div>仓库: <strong>' + data.repo + '</strong> (' + data.branch + ')</div>' +
-      '<div>状态: <span style="color:' + statusColor + ';">' + data.last_status + '</span>' +
+    var statusColor = data.last_status === 'ok' ? 'var(--positive)' : data.last_status === 'error' ? 'var(--negative)' : 'var(--text-dim)';
+    st.innerHTML = '<div>状态: <span style="color:' + statusColor + ';">' + data.last_status + '</span>' +
       (data.last_sync ? ' · 上次同步: ' + data.last_sync : '') +
       (data.last_count ? ' · ' + data.last_count + ' 文件' : '') +
-      (data.consecutive_failures > 0 ? ' · 连续失败 ' + data.consecutive_failures + ' 次' : '') +
+      (data.consecutive_failures > 0 ? ' · <span style="color:var(--negative);">连续失败 ' + data.consecutive_failures + ' 次</span>' : '') +
       '</div>' +
       (data.last_error ? '<div style="color:var(--negative);margin-top:4px;">' + data.last_error + '</div>' : '');
   } catch(e) {
@@ -9213,16 +9240,36 @@ async function loadGithubStatus() {
   }
 }
 
-async function githubValidate() {
-  const r = document.getElementById('github-sync-result');
-  r.textContent = '验证中…';
+async function githubSaveConfig() {
+  var r = document.getElementById('github-sync-result');
+  r.style.color = 'var(--text-dim)';
+  r.textContent = '保存中…';
+  var token = document.getElementById('gh-token').value.trim();
+  var repo = document.getElementById('gh-repo').value.trim();
+  if (!repo) { r.style.color = 'var(--negative)'; r.textContent = '请填写仓库地址'; return; }
+  var body = {
+    repo: repo,
+    branch: document.getElementById('gh-branch').value.trim() || 'main',
+    path_prefix: document.getElementById('gh-prefix').value.trim() || 'ombre',
+    auto_interval_minutes: parseFloat(document.getElementById('gh-interval').value) || 0,
+  };
+  if (token) body.token = token;
   try {
-    const res = await authFetch(BASE + '/api/github/validate', { method: 'POST' });
+    var res = await authFetch(BASE + '/api/github/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
     if (!res) { r.textContent = '认证失败'; return; }
-    const data = await res.json();
+    var data = await res.json();
     r.style.color = data.ok ? 'var(--positive)' : 'var(--negative)';
-    r.textContent = data.ok ? '连接成功: ' + data.repo_full_name + (data.private ? ' (私有)' : '') : '失败: ' + data.error;
-  } catch(e) { r.style.color = 'var(--negative)'; r.textContent = '验证失败: ' + e.message; }
+    r.textContent = data.ok ? '配置已保存，连接验证成功' : '保存失败: ' + (data.error || '未知错误');
+    if (data.ok) {
+      document.getElementById('gh-token').value = '';
+      document.getElementById('gh-token').placeholder = '已配置（留空保持不变）';
+      loadGithubStatus();
+    }
+  } catch(e) { r.style.color = 'var(--negative)'; r.textContent = '保存失败: ' + e.message; }
 }
 
 async function githubSync() {
