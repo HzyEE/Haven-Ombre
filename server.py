@@ -2352,6 +2352,7 @@ def _bucket_read_payload(bucket: dict) -> dict:
         "model_valence",
         "pinned",
         "protected",
+        "always_surface",
         "resolved",
         "digested",
         "anchor",
@@ -3219,20 +3220,19 @@ async def breath_hook(request):
                 )
             )
         all_buckets = await bucket_mgr.list_all(include_archive=False)
-        # pinned
+        # always_surface only
         pinned = [
             b for b in all_buckets
             if not is_self_anchor_bucket(b)
-            and (b["metadata"].get("pinned") or b["metadata"].get("protected"))
+            and b["metadata"].get("always_surface")
         ]
-        # top 2 unresolved by score
+        # top 2 unresolved by score (pinned/protected without always_surface compete here)
         unresolved = [b for b in all_buckets
                       if not is_self_anchor_bucket(b)
                       and not b["metadata"].get("resolved", False)
                       and b["metadata"].get("type") not in ("permanent", "feel")
                       and not b["metadata"].get("anchor", False)
-                      and not b["metadata"].get("pinned")
-                      and not b["metadata"].get("protected")]
+                      and not b["metadata"].get("always_surface")]
         scored = sorted(unresolved, key=lambda b: decay_engine.calculate_score(b["metadata"]), reverse=True)
         anchors = _select_anchor_buckets(all_buckets, limit=2)
 
@@ -7217,26 +7217,14 @@ async def breath(
             logger.error(f"Failed to list buckets for surfacing / 浮现列桶失败: {e}")
             return "记忆系统暂时无法访问。"
 
-        # --- Core buckets: protected first, pinned limited by core_limit ---
-        # --- 核心桶：protected 优先，pinned 按 core_limit 限流 ---
-        core_candidates = [
+        # --- Core buckets: only always_surface forced; pinned/protected compete normally ---
+        # --- 核心桶：仅 always_surface 强制浮现；pinned/protected 回到普通池竞争 ---
+        always_surface_buckets = [
             b for b in all_buckets
             if not is_self_anchor_bucket(b)
-            and (b["metadata"].get("pinned") or b["metadata"].get("protected"))
+            and b["metadata"].get("always_surface")
         ]
-        protected = [
-            b for b in core_candidates
-            if b["metadata"].get("protected")
-        ]
-        pinned = [
-            b for b in core_candidates
-            if b["metadata"].get("pinned") and not b["metadata"].get("protected")
-        ]
-        protected.sort(
-            key=lambda b: decay_engine.calculate_score(b["metadata"]),
-            reverse=True,
-        )
-        pinned.sort(
+        always_surface_buckets.sort(
             key=lambda b: (
                 int(b["metadata"].get("importance", 5)),
                 decay_engine.calculate_score(b["metadata"]),
@@ -7244,19 +7232,19 @@ async def breath(
             ),
             reverse=True,
         )
-        selected_core = (protected + pinned)[:core_limit] if include_core else []
+        selected_core = always_surface_buckets[:core_limit] if include_core else []
         selected_anchors = _select_anchor_buckets(all_buckets, limit=min(2, max_results))
 
         # --- Unresolved buckets: surface top N by weight ---
         # --- 未解决桶：按权重浮现前 N 条 ---
+        # --- pinned/protected without always_surface now compete here ---
         unresolved = [
             b for b in all_buckets
             if not is_self_anchor_bucket(b)
             and not b["metadata"].get("resolved", False)
             and b["metadata"].get("type") not in ("permanent", "feel")
             and not b["metadata"].get("anchor", False)
-            and not b["metadata"].get("pinned", False)
-            and not b["metadata"].get("protected", False)
+            and not b["metadata"].get("always_surface", False)
         ]
 
         logger.info(
@@ -8852,11 +8840,12 @@ async def trace(
     pinned: int = -1,
     anchor: int = -1,
     digested: int = -1,
+    always_surface: int = -1,
     content: str = "",
     date: str = "",
     delete: bool = False,
 ) -> str:
-    """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。只改元数据/date 不重建 embedding，改 content/name 才重建。"""
+    """修改已有记忆，不创建新桶。tags/domain/content 是替换；date 可改事件日期；改前先 read_bucket。resolved/digested 让旧事沉底。always_surface=1 让记忆每次 breath 强制浮现（仅限核心身份）。只改元数据/date 不重建 embedding，改 content/name 才重建。"""
 
     bucket_id = _coerce_memory_id(bucket_id)
     if not bucket_id:
@@ -8895,6 +8884,11 @@ async def trace(
         updates["pinned"] = bool(pinned)
         if pinned == 1:
             updates["importance"] = 10  # pinned → lock importance
+    if always_surface in (0, 1):
+        updates["always_surface"] = bool(always_surface)
+        if always_surface == 1:
+            updates["pinned"] = True
+            updates["importance"] = 10
     if anchor in (0, 1):
         if anchor == 1:
             ok, message = await _can_mark_anchor(bucket_id, bucket)

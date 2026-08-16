@@ -110,9 +110,13 @@ class DecayEngine:
         if not isinstance(metadata, dict):
             return 0.0
 
-        # --- Pinned/protected buckets: never decay, importance locked to 10 ---
-        if metadata.get("pinned") or metadata.get("protected"):
+        # --- always_surface: never decay, always at top ---
+        if metadata.get("always_surface"):
             return 999.0
+
+        # --- Pinned/protected: never archived, but don't force-surface ---
+        if metadata.get("pinned") or metadata.get("protected"):
+            return 100.0
 
         # --- Permanent buckets never decay ---
         if metadata.get("type") == "permanent":
