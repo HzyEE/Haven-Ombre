@@ -9106,7 +9106,7 @@ async function loadLetters() {
   emptyEl.style.display = 'none';
   try {
     const authorFilter = document.getElementById('letter-filter-author').value;
-    const url = authUrl('/api/letters') + (authorFilter ? '&author=' + authorFilter : '');
+    const url = authUrl('/api/letters') + (authorFilter ? '?author=' + authorFilter : '');
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const letters = await res.json();
