@@ -2808,9 +2808,98 @@
     .reflection-day-panel { height: auto; max-height: none; }
     .reflection-entry { grid-template-columns: 1fr; }
   }
+
+  /* SVG icon system */
+  .icon { width:1em; height:1em; vertical-align:-0.15em; display:inline-block; flex-shrink:0; overflow:hidden; }
+  .icon-ok  { color: var(--positive); }
+  .icon-err { color: var(--negative); }
+  .icon-warn { color: var(--warning, #b89962); }
+
+  /* ====== Embedding 未配置警告 banner ====== */
+  #embed-warn-banner {
+    display: none;
+    position: relative;
+    z-index: 39;
+    padding: 9px 20px;
+    background: rgba(184,151,98,0.12);
+    border-bottom: 1.5px solid var(--warning);
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    color: var(--text);
+    backdrop-filter: blur(4px);
+  }
+  #embed-warn-banner.show { display: flex; }
+  .embed-warn-btn {
+    padding: 3px 11px;
+    font-size: 11.5px;
+    border-radius: 3px;
+    border: 1px solid var(--warning);
+    background: transparent;
+    color: var(--warning);
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .embed-warn-btn:hover { background: rgba(184,151,98,0.18); }
+
+  /* ====== P1 常驻系统状态条 ====== */
+  #status-banner {
+    position: sticky; top: var(--ob-header-height, 96px); z-index: 40;
+    font-size: 12.5px; color: var(--text);
+    background: rgba(253,252,240,0.85); backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--border);
+  }
+  #status-banner[data-state="hidden"] { display: none; }
+  .sb-bar { display: flex; align-items: center; gap: 10px; padding: 9px 20px; cursor: pointer; user-select: none; }
+  .sb-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--text-light); transition: background .25s; }
+  #status-banner[data-state="ok"]    .sb-dot { background: var(--positive); }
+  #status-banner[data-state="warn"]  .sb-dot { background: var(--warning); }
+  #status-banner[data-state="error"] .sb-dot { background: var(--negative); box-shadow: 0 0 0 4px rgba(190,90,65,0.14); }
+  .sb-text { flex: 1; line-height: 1.5; }
+  .sb-count { font-family: 'Share Tech Mono', monospace; color: var(--text-dim); font-size: 11.5px; }
+  .sb-chevron { color: var(--text-dim); font-size: 10px; transition: transform .2s; }
+  #status-banner[data-state="ok"] .sb-chevron { transform: rotate(-90deg); }
+  #status-banner.open .sb-chevron { transform: rotate(180deg); }
+  .sb-body { display: none; padding: 2px 20px 12px; flex-direction: column; gap: 8px; }
+  #status-banner.open .sb-body { display: flex; }
+  .sb-card {
+    border-left: 3px solid var(--c, var(--warning));
+    background: var(--surface-solid); border-radius: 8px; padding: 9px 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+    box-shadow: inset 1px 1px 3px var(--shadow-dark-subtle), inset -1px -1px 3px var(--shadow-light);
+  }
+  .sb-card-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; background: var(--c, var(--warning)); }
+  .sb-card-main { flex: 1; min-width: 0; }
+  .sb-card-title { font-weight: 600; font-size: 13px; }
+  .sb-card-msg { color: var(--text-dim); margin-top: 2px; line-height: 1.55; word-break: break-word; }
+  .sb-card-btn {
+    flex-shrink: 0; align-self: center; padding: 5px 13px; font-size: 12px; border-radius: 8px;
+    cursor: pointer; border: none; color: #fffdf5; background: var(--accent); font-family: inherit; white-space: nowrap;
+  }
+  .sb-card-btn.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border-strong); }
+  .sb-card-btn:hover { filter: brightness(1.06); }
+  /* 直达字段高亮闪烁 / flash the field the user was sent to */
+  @keyframes field-flash {
+    0%,100% { box-shadow: 0 0 0 0 rgba(194,152,47,0); }
+    25%,75% { box-shadow: 0 0 0 3px var(--accent-glow); }
+  }
+  .field-flash { animation: field-flash 1.6s ease-in-out; border-radius: 8px; }
+  @media (prefers-reduced-motion: reduce) { .field-flash { animation: none; outline: 2px solid var(--accent); } }
 </style>
 </head>
 <body>
+
+<!-- SVG icon sprite — all icons referenced via <use href="#i-*"> -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2,9 6,13 14,3"/></symbol>
+  <symbol id="i-x" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="8,1.5 15.5,14.5 0.5,14.5"/><line x1="8" y1="6.5" x2="8" y2="10"/><circle cx="8" cy="12.5" r="0.7" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor"/></symbol>
+  <symbol id="i-info" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7.5" x2="8" y2="11.5"/><circle cx="8" cy="5.2" r="0.6" fill="currentColor" stroke="none"/></symbol>
+</svg>
 
 <div class="header">
   <h1>◐ Ombre Brain</h1>
@@ -2845,7 +2934,26 @@
   <div class="tab" data-tab="memory-config">记忆浮现</div>
   <div class="tab" data-tab="letters">信件</div>
   <div class="tab" data-tab="health">健康</div>
+  <div class="tab" data-tab="logs">日志</div>
   <div class="tab" data-tab="data">数据管理</div>
+</div>
+
+<!-- embed-warn-banner: 向量化未配置时始终可见，配置后自动消失 -->
+<div id="embed-warn-banner">
+  <svg class="icon icon-warn" aria-hidden="true" style="flex-shrink:0;width:15px;height:15px;"><use href="#i-warn"></use></svg>
+  <span style="flex:1;line-height:1.5;"><b>向量化未配置</b> — 语义检索完全不可用，记忆系统无法正常运作。请前往「配置」标签页填入向量化 API Key。</span>
+  <button class="embed-warn-btn" onclick="gotoEmbedCloud()">☁ 前往配置</button>
+</div>
+
+<!-- P1 常驻系统状态条：全绿收成一行；有问题才展开「需处理」卡片，按钮直达对应设置字段 -->
+<div id="status-banner" data-state="hidden">
+  <div class="sb-bar" onclick="toggleStatusBanner()">
+    <span class="sb-dot"></span>
+    <span class="sb-text" id="sb-text">体检中…</span>
+    <span class="sb-count" id="sb-count"></span>
+    <span class="sb-chevron">▾</span>
+  </div>
+  <div class="sb-body" id="sb-body"></div>
 </div>
 
 <div class="content" id="list-view">
@@ -3563,12 +3671,85 @@
       <h3 style="margin:0;">记忆健康</h3>
       <button class="btn-secondary" onclick="loadDuplicates()" style="font-size:13px;">刷新</button>
     </div>
+
+    <div class="config-section" id="sec-diagnostics">
+      <h3>系统体检</h3>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
+        快速检查本地配置、数据目录、向量化、GitHub 备份和访问控制，不会主动请求外部 API。
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <button class="btn-secondary" onclick="loadSystemDiagnostics()" title="运行体检" style="font-size:12px;padding:0 12px;height:32px;">一键体检</button>
+        <span id="system-diagnostics-summary" style="font-size:12px;color:var(--text-dim);">尚未运行</span>
+        <span id="system-diagnostics-updated" style="font-size:11px;color:var(--text-light);"></span>
+      </div>
+      <div id="system-diagnostics-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+    </div>
+
+    <div class="config-section" id="sec-fix-pinned">
+      <h3>修复钉选计数</h3>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.6;">
+        若「永久桶计数」明显大于面板里实际的钉选数（取消钉选后计数不减、钉新桶老报上限），
+        点这里清理残留的孤儿固化桶：把它们降级回动态桶，释放配额、解开权重卡死。安全幂等，可重复点。
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-secondary" onclick="fixPinnedDesync()" title="检查并修复" style="font-size:12px;padding:0 12px;height:32px;">检查并修复</button>
+        <span id="fix-pinned-msg" style="font-size:12px;"></span>
+      </div>
+    </div>
+
     <h4 style="margin:16px 0 8px;">疑似重复桶</h4>
     <p style="color:var(--text-dim);font-size:13px;margin-bottom:12px;">向量相似度 &gt; 0.95 的桶对，由 hold/grow 写入时自动标记</p>
     <div id="dup-list" style="display:flex;flex-direction:column;gap:12px;"></div>
     <div id="dup-empty" style="display:none;text-align:center;padding:40px;color:var(--text-dim);">
       <div style="font-size:32px;margin-bottom:8px;">✅</div>
       <div>没有发现重复桶</div>
+    </div>
+  </div>
+</div>
+
+<div class="content" id="logs-view" style="display:none">
+  <div style="max-width:920px;margin:0 auto;">
+    <div class="config-section">
+      <h3>服务日志</h3>
+      <div class="config-row">
+        <label>级别</label>
+        <select id="logs-level" style="flex:0 0 200px;">
+          <option value="WARNING" selected>WARNING + ERROR</option>
+          <option value="ERROR">仅 ERROR</option>
+          <option value="INFO">INFO + 全量</option>
+          <option value="ALL">所有行</option>
+        </select>
+        <label>行数</label>
+        <input type="number" id="logs-limit" value="200" min="20" max="2000" style="flex:0 0 110px;" />
+        <button class="btn-secondary" onclick="loadLogs()" title="刷新日志" style="padding:8px 14px;font-size:12px;">刷新</button>
+        <span id="logs-meta" style="font-size:11px;color:var(--text-dim);margin-left:auto;"></span>
+      </div>
+      <pre id="logs-output" style="background:var(--surface-solid);color:var(--text);padding:16px;border-radius:11px;font-size:11px;max-height:60vh;overflow:auto;line-height:1.55;white-space:pre-wrap;word-break:break-all;box-shadow:inset 2px 2px 5px var(--shadow-dark-subtle),inset -2px -2px 4px var(--shadow-light);font-family:'Share Tech Mono','SF Mono',Consolas,monospace;">点击刷新加载日志…</pre>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-light);">server.log 末尾最多 500 行。</div>
+    </div>
+
+    <!-- 统一错误日志面板 -->
+    <div class="config-section">
+      <h3>错误日志</h3>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6;">
+        统一收录所有 W 级以上错误（OB-W*/OB-E*/OB-F*）与自动降级提示（OB-I*）。<br>
+        每条带时间戳 + 一键复制（含错误码 + 描述 + 建议 + 最近 15 条 log）。
+      </div>
+      <div class="config-row" style="gap:8px;align-items:center;">
+        <label>最低级别</label>
+        <select id="errors-min-level" style="flex:0 0 160px;">
+          <option value="I">I + W + E + F</option>
+          <option value="W" selected>W + E + F（默认）</option>
+          <option value="E">E + F</option>
+          <option value="F">仅 F</option>
+        </select>
+        <button class="btn-secondary" onclick="loadOBErrors()" title="刷新错误" style="padding:6px 10px;font-size:12px;">刷新</button>
+        <button onclick="clearOBErrors()" title="标记已读 / 清空" style="padding:0 10px;height:32px;font-size:12px;">已读</button>
+        <span id="errors-meta" style="font-size:11px;color:var(--text-dim);margin-left:auto;"></span>
+      </div>
+      <div id="errors-list" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+        <div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:12px;">点击「刷新」加载…</div>
+      </div>
     </div>
   </div>
 </div>
@@ -3609,9 +3790,11 @@
       </div>
       <div class="config-row">
         <label>API Key</label>
-        <input type="password" id="cfg-dehy-key" placeholder="当前: 加载中…" />
+        <input type="password" id="cfg-dehy-key" placeholder="当前: 加载中…" style="flex:1;" />
+        <button type="button" class="btn-secondary" onclick="testDehydrationKey()" title="测试连接" style="flex:none;padding:0 10px;height:36px;font-size:12px;white-space:nowrap;">测试</button>
       </div>
-      <div style="margin-top:-4px;margin-bottom:12px;padding-left:122px;font-size:11px;color:var(--text-light);">留空不改。不会持久化到 yaml（请用环境变量）</div>
+      <div style="margin-top:-4px;margin-bottom:4px;padding-left:122px;font-size:11px;color:var(--text-light);">留空不改。不会持久化到 yaml（请用环境变量）</div>
+      <div id="dehy-key-msg" style="margin-bottom:8px;padding-left:122px;font-size:11px;"></div>
       <div class="config-row">
         <label>Max Tokens</label>
         <input type="number" id="cfg-dehy-maxtokens" min="128" max="8192" />
@@ -3638,9 +3821,11 @@
       </div>
       <div class="config-row">
         <label>API Key</label>
-        <input type="password" id="cfg-emb-key" placeholder="当前: 加载中…" />
+        <input type="password" id="cfg-emb-key" placeholder="当前: 加载中…" style="flex:1;" />
+        <button type="button" class="btn-secondary" onclick="testEmbeddingKey()" title="测试连接" style="flex:none;padding:0 10px;height:36px;font-size:12px;white-space:nowrap;">测试</button>
       </div>
-      <div style="margin-top:-4px;padding-left:122px;font-size:11px;color:var(--text-light);">留空时复用脱水 API。API Key 不会持久化到 yaml（请用环境变量）</div>
+      <div style="margin-top:-4px;margin-bottom:4px;padding-left:122px;font-size:11px;color:var(--text-light);">留空时复用脱水 API。API Key 不会持久化到 yaml（请用环境变量）</div>
+      <div id="emb-key-msg" style="padding-left:122px;font-size:11px;"></div>
     </div>
 
     <div class="config-section">
@@ -3964,6 +4149,37 @@ async function authFetch(url, options) {
   return response;
 }
 
+// SVG icon strings — drop-in replacements for emoji in innerHTML
+const _SV = {
+  ok:     '<svg class="icon icon-ok"   aria-hidden="true"><use href="#i-check"></use></svg>',
+  err:    '<svg class="icon icon-err"  aria-hidden="true"><use href="#i-x"></use></svg>',
+  warn:   '<svg class="icon icon-warn" aria-hidden="true"><use href="#i-warn"></use></svg>',
+  stop:   '<svg class="icon icon-err"  aria-hidden="true"><use href="#i-stop"></use></svg>',
+  info:   '<svg class="icon"           aria-hidden="true"><use href="#i-info"></use></svg>',
+};
+
+// 安全解析 JSON：当响应体为空或不是 JSON（典型是网关错误页）时给出人话错误，而不是抛 SyntaxError
+async function readJsonSafe(resp) {
+  var text = await resp.text();
+  if (!text || !text.trim()) {
+    throw new Error('服务无响应（HTTP ' + resp.status + '），请稍后重试');
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    var snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    throw new Error('网关/网络错误（HTTP ' + resp.status + '）：' + (snippet || '响应非 JSON') + ' — 请稍后重试');
+  }
+}
+
+// 占位：Haven-Brain 没有 ObPet 小鸡彩蛋，保留调用点不报错即可
+function chickReactForApiProblem(message) {
+  if (!window.ObPet) return;
+  var text = String(message || '').toLowerCase();
+  if (/429|rate.?limit|限频|限流/.test(text)) window.ObPet.react('rate_limit');
+  else if (/401|invalid.*key|key.*invalid|api.?key.*(无效|错误)|鉴权失败/.test(text)) window.ObPet.react('invalid_key');
+}
+
 function showAuthError(message) {
   const el = document.getElementById('auth-error');
   el.textContent = message;
@@ -4058,6 +4274,445 @@ async function doLogout() {
   showAuthOverlay(false);
 }
 
+// ========================================
+// API Key 连接测试
+// ========================================
+async function testDehydrationKey() {
+  const msgEl = document.getElementById('dehy-key-msg');
+  if (!msgEl) return;
+  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '测试中…';
+  const resp = await authFetch(BASE + '/api/test/dehydration', {method: 'POST'});
+  if (!resp) return;
+  const d = await resp.json().catch(() => ({}));
+  if (d.ok) {
+    msgEl.style.color = 'var(--positive)'; msgEl.innerHTML = _SV.ok + ' ' + esc(d.message || '连接成功');
+  } else {
+    msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(d.error || '连接失败');
+    chickReactForApiProblem(d.error);
+  }
+}
+
+async function testEmbeddingKey() {
+  const msgEl = document.getElementById('emb-key-msg');
+  if (!msgEl) return;
+  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '测试中…';
+  const resp = await authFetch(BASE + '/api/test/embedding', {method: 'POST'});
+  if (!resp) return;
+  const d = await resp.json().catch(() => ({}));
+  if (d.ok) {
+    msgEl.style.color = 'var(--positive)'; msgEl.innerHTML = _SV.ok + ' ' + esc(d.message || '向量化连接成功');
+  } else {
+    msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(d.error || '向量化连接失败');
+    chickReactForApiProblem(d.error);
+  }
+}
+
+// ========================================
+// 系统体检 / Diagnostics
+// ========================================
+function diagnosticStatusLabel(status) {
+  if (status === 'ok') return '正常';
+  if (status === 'warning') return '提醒';
+  if (status === 'error') return '需处理';
+  return status || '未知';
+}
+
+function diagnosticStatusColor(status) {
+  if (status === 'ok') return 'var(--positive,#87A987)';
+  if (status === 'warning') return 'var(--warning,#B89762)';
+  if (status === 'error') return 'var(--negative,#BE5A41)';
+  return 'var(--text-dim)';
+}
+
+// 体检项标签中文化：后端 id → 中文（主）+ 英文（小字）
+var DIAG_LABELS = {
+  storage:                   ['数据目录', 'Storage'],
+  buckets:                   ['记忆桶', 'Buckets'],
+  ledger:                    ['事件账本', 'Ledger'],
+  observability_boundary:    ['可观测性边界', 'Observability'],
+  public_tool_manifest:      ['公开工具清单', 'Tool Manifest'],
+  adr_requirements:          ['架构决策记录', 'ADR'],
+  code_standards:            ['代码规范', 'Code Standards'],
+  red_lines:                 ['红线约束', 'Red Lines'],
+  crash_recovery:            ['崩溃恢复', 'Crash Recovery'],
+  replication_contract:      ['复制契约', 'Replication'],
+  migration_preservation:    ['迁移保真', 'Migration'],
+  surface_context:           ['浮现上下文', 'Surface Context'],
+  preflight_cli_diagnostics: ['预检 CLI', 'Preflight CLI'],
+  vnext_preflight:           ['vNext 预检', 'vNext Preflight'],
+  preflight_report_self:     ['预检自检', 'Preflight Self'],
+  vnext_coverage:            ['vNext 覆盖率', 'vNext Coverage'],
+  llm:                       ['压缩 / 打标 LLM', 'Compression LLM'],
+  embedding:                 ['向量化', 'Embedding'],
+  integrity:                 ['数据完整性', 'Integrity'],
+  github:                    ['GitHub 备份', 'GitHub Backup'],
+  auth:                      ['访问控制', 'Access Control'],
+  runtime:                   ['运行时', 'Runtime'],
+};
+function diagLabelHtml(check) {
+  var m = DIAG_LABELS[check.id];
+  if (m) return esc(m[0]) + ' <span style="color:var(--text-light);font-size:11px;">' + esc(m[1]) + '</span>';
+  return esc(check.label || check.id || '检查项');
+}
+
+// 开发者向内部工程/契约检查，跟记忆好不好无关 → 折叠进「开发者诊断」
+var DIAG_DEV_IDS = {
+  ledger: 1, observability_boundary: 1, public_tool_manifest: 1, adr_requirements: 1,
+  code_standards: 1, red_lines: 1, crash_recovery: 1, replication_contract: 1,
+  migration_preservation: 1, surface_context: 1, preflight_cli_diagnostics: 1,
+  vnext_preflight: 1, preflight_report_self: 1, vnext_coverage: 1,
+};
+function isDevCheck(c) { return !!DIAG_DEV_IDS[c && c.id]; }
+
+function renderDiagnosticCheck(check) {
+  const color = diagnosticStatusColor(check.status);
+  const details = check.details || {};
+  let hasDetails = false;
+  for (const k in details) {
+    const v = details[k];
+    if (v !== null && v !== undefined && v !== '') { hasDetails = true; break; }
+  }
+  let detailBlock = '';
+  if (hasDetails) {
+    let pretty = '';
+    try { pretty = JSON.stringify(details, null, 2); } catch (e) { pretty = ''; }
+    detailBlock = '<details style="margin-top:5px;">'
+      + '<summary style="cursor:pointer;color:var(--accent);font-size:11px;user-select:none;">查看详情</summary>'
+      + '<pre style="margin-top:5px;padding:8px 10px;background:var(--bg);border-radius:6px;max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;color:var(--text-dim);font-family:\'Share Tech Mono\',\'SF Mono\',Consolas,monospace;">'
+      + esc(pretty) + '</pre></details>';
+  }
+  return '<div style="border-left:3px solid ' + color + ';padding:9px 11px;background:var(--surface-solid);border-radius:8px;font-size:12px;line-height:1.6;box-shadow:inset 1px 1px 3px var(--shadow-dark-subtle),inset -1px -1px 3px var(--shadow-light);">'
+    + '<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;">'
+    + '<strong style="font-size:13px;color:var(--text);">' + diagLabelHtml(check) + '</strong>'
+    + '<span style="color:' + color + ';font-weight:600;">' + diagnosticStatusLabel(check.status) + '</span>'
+    + '</div>'
+    + '<div style="color:var(--text-dim);margin-top:3px;">' + esc(check.message || '') + '</div>'
+    + (check.action ? '<div style="color:var(--accent);margin-top:3px;">建议：' + esc(check.action) + '</div>' : '')
+    + detailBlock
+    + '</div>';
+}
+
+async function loadSystemDiagnostics() {
+  const summaryEl = document.getElementById('system-diagnostics-summary');
+  const listEl = document.getElementById('system-diagnostics-list');
+  const updatedEl = document.getElementById('system-diagnostics-updated');
+  if (!summaryEl || !listEl) return;
+  summaryEl.style.color = 'var(--text-dim)';
+  summaryEl.textContent = '体检中…';
+  listEl.innerHTML = '';
+  try {
+    const resp = await authFetch(BASE + '/api/system/diagnostics');
+    if (!resp) return;
+    const d = await readJsonSafe(resp);
+    const checks = d.checks || [];
+    const userChecks = checks.filter(function (c) { return !isDevCheck(c); });
+    const devChecks = checks.filter(isDevCheck);
+    var us = { ok: 0, warning: 0, error: 0 };
+    userChecks.forEach(function (c) { if (us[c.status] != null) us[c.status]++; });
+    const allOk = us.error === 0 && us.warning === 0;
+    summaryEl.style.color = allOk ? 'var(--positive,#87A987)' : 'var(--negative,#BE5A41)';
+    summaryEl.innerHTML = (allOk ? _SV.ok + ' ' : _SV.warn + ' ')
+      + '正常 ' + us.ok + ' · 提醒 ' + us.warning + ' · 需处理 ' + us.error;
+    var html = userChecks.length
+      ? userChecks.map(renderDiagnosticCheck).join('')
+      : '<div style="font-size:12px;color:var(--text-dim);">没有返回体检项。</div>';
+    if (devChecks.length) {
+      var devOk = devChecks.filter(function (c) { return c.status === 'ok'; }).length;
+      html += '<details style="margin-top:14px;">'
+        + '<summary style="cursor:pointer;color:var(--text-light);font-size:12px;user-select:none;">开发者诊断（' + devOk + '/' + devChecks.length + ' 正常）</summary>'
+        + '<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">'
+        + devChecks.map(renderDiagnosticCheck).join('')
+        + '</div></details>';
+    }
+    listEl.innerHTML = html;
+    if (updatedEl) updatedEl.textContent = '刚刚刷新 ' + new Date().toLocaleTimeString();
+  } catch(e) {
+    summaryEl.style.color = 'var(--negative)';
+    summaryEl.textContent = '体检失败：' + (e && e.message ? e.message : e);
+  }
+}
+
+// ====== P1 常驻系统状态条 ======
+// 只有这几项对应用户能自己动手改的设置字段；其余一律「查看详情」跳到健康页体检。
+const SB_ACTION_TARGETS = {
+  embedding: { field: 'cfg-emb-key' },
+  llm:       { field: 'cfg-dehy-key' },
+  github:    { field: 'sec-github' },
+};
+
+// 跳到某个 tab 里的具体字段并高亮闪烁
+function scrollToField(elId) {
+  document.querySelector('[data-tab=config]')?.click();
+  setTimeout(function () {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove('field-flash');
+    void el.offsetWidth;
+    el.classList.add('field-flash');
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
+      try { el.focus({ preventScroll: true }); } catch (e) {}
+    }
+    setTimeout(function () { el.classList.remove('field-flash'); }, 1900);
+  }, 260);
+}
+
+// 「查看详情」：跳到健康页并跑一次完整体检
+function gotoDiagnostics() {
+  document.querySelector('[data-tab=health]')?.click();
+  setTimeout(function () {
+    const s = document.getElementById('sec-diagnostics');
+    if (s) { s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    if (typeof loadSystemDiagnostics === 'function') loadSystemDiagnostics();
+  }, 260);
+}
+
+function toggleStatusBanner() {
+  const b = document.getElementById('status-banner');
+  if (!b) return;
+  if (b.getAttribute('data-state') === 'ok') { gotoDiagnostics(); return; }
+  b.classList.toggle('open');
+}
+
+// 顶栏会随窗口宽度、按钮换行改变高度，状态条不能使用固定偏移
+var _statusHeaderResizeObserver = null;
+function syncStatusBannerOffset() {
+  const header = document.querySelector('.header');
+  if (!header) return;
+  const height = Math.ceil(header.getBoundingClientRect().height);
+  document.documentElement.style.setProperty('--ob-header-height', height + 'px');
+}
+function watchStatusBannerOffset() {
+  const header = document.querySelector('.header');
+  if (!header) return;
+  syncStatusBannerOffset();
+  if (typeof ResizeObserver === 'function') {
+    _statusHeaderResizeObserver = new ResizeObserver(syncStatusBannerOffset);
+    _statusHeaderResizeObserver.observe(header);
+  } else {
+    window.addEventListener('resize', syncStatusBannerOffset);
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', watchStatusBannerOffset, { once: true });
+} else {
+  watchStatusBannerOffset();
+}
+
+function renderStatusBannerCard(check) {
+  const color = check.status === 'error' ? 'var(--negative)' : 'var(--warning)';
+  const target = SB_ACTION_TARGETS[check.id];
+  const btn = (target && target.field)
+    ? '<button class="sb-card-btn" onclick="scrollToField(\'' + target.field + '\')">前往处理</button>'
+    : '<button class="sb-card-btn ghost" onclick="gotoDiagnostics()">查看详情</button>';
+  return '<div class="sb-card" style="--c:' + color + '">'
+    + '<span class="sb-card-dot"></span>'
+    + '<div class="sb-card-main">'
+    + '<div class="sb-card-title">' + diagLabelHtml(check) + '</div>'
+    + '<div class="sb-card-msg">' + esc(check.message || '') + '</div>'
+    + '</div>' + btn + '</div>';
+}
+
+async function loadStatusBanner() {
+  const banner = document.getElementById('status-banner');
+  if (!banner) return;
+  const textEl = document.getElementById('sb-text');
+  const countEl = document.getElementById('sb-count');
+  const bodyEl = document.getElementById('sb-body');
+  banner.setAttribute('data-state', 'loading');
+  banner.classList.remove('open');
+  textEl.textContent = '体检中…';
+  countEl.textContent = '';
+  bodyEl.innerHTML = '';
+  try {
+    const resp = await authFetch(BASE + '/api/system/diagnostics');
+    if (!resp) { banner.setAttribute('data-state', 'hidden'); return; }
+    const d = await readJsonSafe(resp);
+    const checks = (d.checks || []).filter(function (c) { return !isDevCheck(c); });
+    const total = checks.length;
+    const problems = checks.filter(function (c) { return c.status === 'error' || c.status === 'warning'; });
+    problems.sort(function (a, b) { return (a.status === 'error' ? 0 : 1) - (b.status === 'error' ? 0 : 1); });
+    if (problems.length === 0) {
+      banner.setAttribute('data-state', 'ok');
+      textEl.innerHTML = '<b>系统正常</b>';
+      countEl.textContent = total + ' 项检查全部通过';
+      return;
+    }
+    const nErr = problems.filter(function (c) { return c.status === 'error'; }).length;
+    banner.setAttribute('data-state', nErr ? 'error' : 'warn');
+    textEl.innerHTML = '<b>' + problems.length + ' 项需处理</b>';
+    countEl.textContent = '其余 ' + (total - problems.length) + ' 项正常';
+    bodyEl.innerHTML = problems.map(renderStatusBannerCard).join('');
+    banner.classList.add('open');
+  } catch (e) {
+    banner.setAttribute('data-state', 'hidden');
+  }
+}
+
+// 修复钉选计数：先 GET 预演拿孤儿数 → 确认 → POST 实际降级
+async function fixPinnedDesync() {
+  const msgEl = document.getElementById('fix-pinned-msg');
+  if (!msgEl) return;
+  msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '检查中…';
+  try {
+    const presp = await authFetch(BASE + '/api/maintenance/fix-pinned-desync');
+    if (!presp) return;
+    const pd = await readJsonSafe(presp);
+    if (!pd.ok) { msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(pd.error || '检查失败'); return; }
+    const n = (pd.orphans || []).length;
+    if (n === 0) {
+      msgEl.style.color = 'var(--positive)';
+      msgEl.innerHTML = _SV.ok + ` 计数已对齐，当前钉选 ${pd.pinned} 个，无需修复`;
+      return;
+    }
+    if (!confirm(`发现 ${n} 个孤儿固化桶（已取消钉选却没降级）。\n将把它们降级回动态桶（释放配额、解开权重卡死），不会删除内容。是否继续？`)) {
+      msgEl.style.color = 'var(--text-dim)'; msgEl.textContent = '已取消';
+      return;
+    }
+    msgEl.textContent = '修复中…';
+    const aresp = await authFetch(BASE + '/api/maintenance/fix-pinned-desync', { method: 'POST' });
+    if (!aresp) return;
+    const ad = await readJsonSafe(aresp);
+    if (!ad.ok) { msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(ad.error || '修复失败'); return; }
+    msgEl.style.color = 'var(--positive)';
+    msgEl.innerHTML = _SV.ok + ` 已降级 ${ad.demoted} 个` + (ad.failed ? `，失败 ${ad.failed} 个` : '') + `，现在钉选 ${ad.pinned} 个`;
+  } catch (e) {
+    msgEl.style.color = 'var(--negative)'; msgEl.innerHTML = _SV.err + ' ' + esc(e.message || String(e));
+  }
+}
+
+// ========================================
+// Logs tab — 服务日志 + 错误日志
+// ========================================
+async function loadLogs() {
+  const out = document.getElementById('logs-output');
+  const meta = document.getElementById('logs-meta');
+  if (!out) return;
+  out.textContent = '加载中…';
+  const level = document.getElementById('logs-level').value;
+  const limit = parseInt(document.getElementById('logs-limit').value, 10) || 200;
+  try {
+    const r = await authFetch(BASE + '/api/logs?level=' + encodeURIComponent(level) + '&limit=' + limit);
+    if (!r) return;
+    const d = await r.json();
+    if (d.error) { out.textContent = '加载失败: ' + d.error; return; }
+    const fullPath = d.log_file || '';
+    const fileName = fullPath.split(/[\\/]/).pop() || fullPath;
+    meta.title = fullPath;
+    if (!d.lines || !d.lines.length) {
+      out.textContent = d.note || '(无符合条件的日志)';
+      meta.textContent = fileName;
+      return;
+    }
+    out.textContent = d.lines.join('\n');
+    meta.textContent = fileName + ' · ' + d.count + ' 行';
+    out.scrollTop = out.scrollHeight;
+  } catch (e) { out.textContent = '加载失败: ' + e.message; }
+}
+
+function _obLevelStyle(lvl) {
+  if (lvl === 'F') return { bg: 'rgba(184,92,60,0.12)', border: 'rgba(184,92,60,0.5)', label: _SV.stop+' Fatal',   color: 'var(--accent)' };
+  if (lvl === 'E') return { bg: 'rgba(184,92,60,0.08)', border: 'rgba(184,92,60,0.35)', label: _SV.err+' Error',   color: 'var(--accent)' };
+  if (lvl === 'W') return { bg: 'rgba(212,175,55,0.10)', border: 'rgba(212,175,55,0.40)', label: _SV.warn+' Warn',  color: '#7d6720' };
+  return { bg: 'rgba(120,140,170,0.08)', border: 'rgba(120,140,170,0.30)', label: _SV.info+' Info', color: 'var(--text-dim)' };
+}
+
+async function loadOBErrors() {
+  const box = document.getElementById('errors-list');
+  const meta = document.getElementById('errors-meta');
+  if (!box) return;
+  const minLvl = document.getElementById('errors-min-level').value || 'W';
+  box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:20px 0;font-size:12px;">加载中…</div>';
+  try {
+    const r = await authFetch(BASE + '/api/errors/recent?min_level=' + encodeURIComponent(minLvl) + '&limit=100');
+    if (!r) return;
+    const d = await r.json();
+    if (d.error) { box.innerHTML = '<div style="color:var(--negative);">' + esc(d.error) + '</div>'; return; }
+    const items = d.errors || [];
+    if (!items.length) {
+      box.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:12px;">暂无 ' + minLvl + ' 级以上的错误记录。</div>';
+      meta.textContent = '0 条';
+      return;
+    }
+    meta.textContent = items.length + ' 条';
+    box.innerHTML = items.map(function(it, i) {
+      var st = _obLevelStyle(it.level || 'W');
+      var copyId = 'ob-err-copy-' + i;
+      return (
+        '<div style="border:1px solid ' + st.border + ';background:' + st.bg + ';border-radius:6px;padding:10px 12px;">' +
+        '<div style="display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap;">' +
+          '<span style="color:' + st.color + ';font-weight:600;">' + st.label + '</span>' +
+          '<span style="font-family:\'Share Tech Mono\',monospace;color:var(--text);">' + esc(it.code || '?') + '</span>' +
+          '<span style="color:var(--text);">' + esc(it.title || '') + '</span>' +
+          '<span style="margin-left:auto;color:var(--text-dim);font-size:11px;">' + esc(it.ts || '') + '</span>' +
+          '<button onclick="copyOBError(' + i + ')" id="' + copyId + '" ' +
+            'class="btn-secondary" style="padding:3px 10px;font-size:11px;">复制</button>' +
+        '</div>' +
+        (it.detail ? '<div style="font-size:12px;color:var(--text-dim);margin-top:6px;line-height:1.6;">' + esc(it.detail) + '</div>' : '') +
+        '<details style="margin-top:6px;"><summary style="font-size:11px;color:var(--text-dim);cursor:pointer;">展开完整报告（含建议+最近 15 条 log）</summary>' +
+        '<pre style="margin:8px 0 0;background:var(--bg);padding:10px;border-radius:4px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all;font-family:\'Share Tech Mono\',monospace;color:var(--text);">' + esc(it.formatted || '') + '</pre>' +
+        '</details>' +
+        '</div>'
+      );
+    }).join('');
+    window._obErrorFormatted = items.map(function(it) { return it.formatted || ''; });
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--negative);">加载失败：' + esc(e.message) + '</div>';
+  }
+}
+
+function copyOBError(i) {
+  var arr = window._obErrorFormatted || [];
+  var text = arr[i] || '';
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = document.getElementById('ob-err-copy-' + i);
+    if (btn) {
+      var orig = btn.textContent;
+      btn.textContent = '已复制';
+      setTimeout(function() { btn.textContent = orig; }, 1200);
+    }
+  }).catch(function(e) { alert('复制失败：' + e.message); });
+}
+
+async function clearOBErrors() {
+  if (!confirm('清空错误日志？此操作不影响 server.log，仅清空 errors.jsonl。')) return;
+  try {
+    var r = await authFetch(BASE + '/api/errors/clear', { method: 'POST' });
+    if (!r) return;
+    var d = await r.json();
+    if (d.error) { alert('清空失败：' + d.error); return; }
+    await loadOBErrors();
+  } catch (e) { alert('清空失败：' + e.message); }
+}
+
+// ========================================
+// Embedding 未配置警告 banner
+// ========================================
+async function checkEmbedWarnBanner() {
+  try {
+    const resp = await authFetch(BASE + '/api/config');
+    if (!resp) return;
+    const cfg = await resp.json();
+    const banner = document.getElementById('embed-warn-banner');
+    if (banner) banner.classList.toggle('show', !(cfg.embedding && cfg.embedding.enabled));
+  } catch (e) { /* 静默 */ }
+}
+function gotoEmbedCloud() {
+  document.querySelector('[data-tab=config]')?.click();
+  setTimeout(() => {
+    const el = document.getElementById('cfg-emb-key');
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+  }, 250);
+}
+function gotoEmbedLocal() {
+  document.querySelector('[data-tab=config]')?.click();
+  setTimeout(() => {
+    const el = document.getElementById('cfg-emb-url');
+    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+  }, 250);
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -4079,9 +4734,11 @@ document.querySelectorAll('.tab').forEach(tab => {
     document.getElementById('model-config-view').style.display = target === 'model-config' ? '' : 'none';
     document.getElementById('letters-view').style.display = target === 'letters' ? '' : 'none';
     document.getElementById('health-view').style.display = target === 'health' ? '' : 'none';
+    document.getElementById('logs-view').style.display = target === 'logs' ? '' : 'none';
     document.getElementById('data-view').style.display = target === 'data' ? '' : 'none';
     if (target === 'letters') loadLetters();
-    if (target === 'health') loadDuplicates();
+    if (target === 'health') { loadDuplicates(); loadSystemDiagnostics(); }
+    if (target === 'logs') { loadLogs(); loadOBErrors(); }
     if (target === 'data') loadGithubStatus();
     if (target === 'todos') loadTodos();
     if (target === 'breath') loadGatewayInjections();
@@ -8906,7 +9563,11 @@ async function saveConfig(persist, persistEnv) {
 }
 
 checkAuth().then(function(ok) {
-  if (ok) loadBuckets();
+  if (ok) {
+    loadBuckets();
+    loadStatusBanner();
+    checkEmbedWarnBanner();
+  }
 });
 
 // --- Import functions ---
