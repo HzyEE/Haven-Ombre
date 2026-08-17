@@ -13783,6 +13783,461 @@ async def api_status(request):
 
 
 # =============================================================
+# Diagnostics dashboard API — ported from Ombre-Brain, simplified
+# 诊断面板 API —— 从 Ombre-Brain 移植，Haven-Brain 下做了简化
+#
+# Haven-Brain has no errors.py / ombrebrain.* architecture modules, so these
+# routes are self-contained: they read directly off bucket_mgr / dehydrator /
+# embedding_engine / config instead of importing anything that doesn't exist
+# here.
+# Haven-Brain 没有 errors.py 和 ombrebrain.* 那套架构模块，所以这些路由都是
+# 自包含的：直接读 bucket_mgr / dehydrator / embedding_engine / config，
+# 不导入任何这里不存在的模块。
+# =============================================================
+
+_DIAG_LOGS_DEFAULT_LIMIT = 200
+_DIAG_LOGS_MAX_LIMIT = 2000
+_DIAG_ERRORS_DEFAULT_LIMIT = 50
+_DIAG_ERRORS_MAX_LIMIT = 500
+
+
+def _diag_check(check_id: str, label: str, status: str, message: str, *,
+                 action: str = "", details: dict | None = None) -> dict:
+    item: dict = {"id": check_id, "label": label, "status": status, "message": message}
+    if action:
+        item["action"] = action
+    if details is not None:
+        item["details"] = details
+    return item
+
+
+async def _build_system_diagnostics() -> dict:
+    """Read-only health snapshot for the dashboard. No network calls other
+    than the ones the caller explicitly triggers via /api/test/*."""
+    checks: list[dict] = []
+
+    # --- storage: buckets dir exists & writable ---
+    buckets_dir = str(config.get("buckets_dir") or "").strip()
+    if not buckets_dir or not os.path.isdir(buckets_dir):
+        checks.append(_diag_check(
+            "storage", "数据存储", "error",
+            f"记忆目录不存在：{buckets_dir or '(未配置)'}",
+            action="检查 buckets_dir 配置或挂载点",
+            details={"buckets_dir": buckets_dir},
+        ))
+    else:
+        writable = os.access(buckets_dir, os.W_OK)
+        checks.append(_diag_check(
+            "storage", "数据存储",
+            "ok" if writable else "error",
+            f"记忆目录存在{'，可写' if writable else '，但不可写'}：{buckets_dir}",
+            details={"buckets_dir": buckets_dir},
+            action="" if writable else "检查目录权限",
+        ))
+
+    # --- buckets: get_stats() ---
+    try:
+        stats = await bucket_mgr.get_stats()
+        permanent = int(stats.get("permanent_count", 0) or 0)
+        dynamic = int(stats.get("dynamic_count", 0) or 0)
+        archive = int(stats.get("archive_count", 0) or 0)
+        feel = int(stats.get("feel_count", 0) or 0)
+        checks.append(_diag_check(
+            "buckets", "记忆桶", "ok",
+            f"活跃记忆 {permanent + dynamic} 条（permanent {permanent}，dynamic {dynamic}），"
+            f"归档 {archive} 条，感受 {feel} 条",
+            details=stats,
+        ))
+    except Exception as e:
+        checks.append(_diag_check(
+            "buckets", "记忆桶", "error", f"记忆桶统计读取失败：{e}",
+            action="查看日志或检查 bucket markdown frontmatter",
+        ))
+
+    # --- llm: dehydration/compression API key ---
+    dehy_key_set = bool(getattr(dehydrator, "api_key", ""))
+    dehy_client_ready = getattr(dehydrator, "client", None) is not None
+    if not dehy_key_set:
+        llm_status, llm_msg, llm_action = (
+            "error", "脱水/打标 LLM 未配置 API Key", "设置 OMBRE_API_KEY 环境变量，或在 config.yaml 的 dehydration.api_key 填写",
+        )
+    elif not dehy_client_ready:
+        llm_status, llm_msg, llm_action = (
+            "warning", "已配置 API Key，但客户端未就绪", "检查 dehydration.base_url / api_format 配置",
+        )
+    else:
+        llm_status, llm_msg, llm_action = ("ok", "脱水/打标 LLM 配置已就绪", "")
+    checks.append(_diag_check(
+        "llm", "脱水 / 打标 LLM", llm_status, llm_msg,
+        details={
+            "api_key_set": dehy_key_set,
+            "model": getattr(dehydrator, "model", ""),
+            "base_url": getattr(dehydrator, "base_url", ""),
+        },
+        action=llm_action,
+    ))
+
+    # --- embedding ---
+    emb_enabled = bool(getattr(embedding_engine, "enabled", False))
+    emb_client_ready = getattr(embedding_engine, "client", None) is not None
+    if not emb_enabled or not emb_client_ready:
+        emb_status, emb_msg, emb_action = (
+            "warning",
+            "向量化未启用或缺少 API Key，语义检索不可用；记忆原文仍会正常写入",
+            "设置 OMBRE_EMBEDDING_API_KEY 环境变量，或在 config.yaml 的 embedding 段填写 api_key 并启用",
+        )
+    else:
+        emb_status, emb_msg, emb_action = ("ok", "向量化运行时已就绪", "")
+    checks.append(_diag_check(
+        "embedding", "向量化", emb_status, emb_msg,
+        details={
+            "enabled": emb_enabled,
+            "model": getattr(embedding_engine, "model", ""),
+            "db_path": getattr(embedding_engine, "db_path", ""),
+        },
+        action=emb_action,
+    ))
+
+    # --- github backup ---
+    if github_sync is not None:
+        gh_status = github_sync.status()
+        last_status = gh_status.get("last_status", "idle")
+        validated = bool(gh_status.get("is_validated"))
+        if last_status == "error":
+            gh_check_status = "warning"
+            gh_msg = "最近一次 GitHub 备份失败，请检查 Token / 仓库是否仍然有效"
+        elif not validated:
+            gh_check_status = "warning"
+            gh_msg = "GitHub 同步已配置，但尚未验证权限"
+        else:
+            gh_check_status = "ok"
+            gh_msg = "GitHub 备份配置已就绪"
+        checks.append(_diag_check(
+            "github", "GitHub 备份", gh_check_status, gh_msg, details=gh_status,
+        ))
+    else:
+        checks.append(_diag_check(
+            "github", "GitHub 备份", "warning",
+            "未配置云端备份，记忆目前只有本地一份",
+            action="在 config.yaml 的 github_sync 段填写 token / repo 开启云端备份",
+            details={"configured": False},
+        ))
+
+    # --- auth: dashboard password ---
+    setup_needed = _dashboard_setup_needed()
+    checks.append(_diag_check(
+        "auth", "访问控制",
+        "error" if setup_needed else "ok",
+        "Dashboard 密码尚未设置" if setup_needed else "Dashboard 密码已设置",
+        action="先设置 Dashboard 密码" if setup_needed else "",
+        details={"using_env_password": bool(os.environ.get("OMBRE_DASHBOARD_PASSWORD", ""))},
+    ))
+
+    summary = {"ok": 0, "warning": 0, "error": 0}
+    for item in checks:
+        status = item.get("status")
+        if status in summary:
+            summary[status] += 1
+
+    return {"ok": summary["error"] == 0, "summary": summary, "checks": checks}
+
+
+@mcp.custom_route("/api/system/diagnostics", methods=["GET"])
+async def api_system_diagnostics(request):
+    """Simplified system health check (storage/buckets/llm/embedding/github/auth)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        return JSONResponse(await _build_system_diagnostics())
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/test/dehydration", methods=["POST"])
+async def api_test_dehydration(request):
+    """Fire a tiny real chat-completion call against the dehydration LLM."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    if not getattr(dehydrator, "api_key", "") or getattr(dehydrator, "client", None) is None:
+        return JSONResponse({"ok": False, "error": "未设置 API Key"}, status_code=400)
+    try:
+        response = await dehydrator.client.chat.completions.create(
+            model=dehydrator.model,
+            messages=[{"role": "user", "content": "hi"}],
+            **dehydrator._completion_options(max_tokens=5, temperature=0),
+        )
+        if response.choices:
+            return JSONResponse({"ok": True, "message": "连接成功"})
+        return JSONResponse({"ok": False, "error": "API 返回为空"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:300]})
+
+
+@mcp.custom_route("/api/test/embedding", methods=["POST"])
+async def api_test_embedding(request):
+    """Fire a tiny real embedding call to verify the connection actually works."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    if not getattr(embedding_engine, "enabled", False) or getattr(embedding_engine, "client", None) is None:
+        return JSONResponse({
+            "ok": False,
+            "error": "向量化未启用或缺少 API Key，请先配置并保存后再测试。",
+        })
+    try:
+        vec = await embedding_engine._generate_embedding("connectivity probe / 连接性探针", kind="query")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"{type(e).__name__}: {e}"[:300]})
+    if vec:
+        return JSONResponse({
+            "ok": True,
+            "message": f"连接成功（模型 {embedding_engine.model}，维度 {len(vec)}）",
+        })
+    return JSONResponse({
+        "ok": False,
+        "error": "调用返回空向量：检查 model / base_url / API Key 是否匹配该 provider。",
+    })
+
+
+def _diag_candidate_log_paths() -> list[str]:
+    """Best-effort guesses for a log file. Haven-Brain's own setup_logging()
+    only attaches a StreamHandler (stderr) — there is no file handler by
+    default — so this only finds a log file if the deployment redirects
+    stderr to one of these paths itself."""
+    candidates = []
+    env_path = os.environ.get("OMBRE_LOG_FILE", "").strip()
+    if env_path:
+        candidates.append(env_path)
+    state_dir = str(config.get("state_dir") or "").strip()
+    if state_dir:
+        candidates.append(os.path.join(state_dir, "server.log"))
+    buckets_dir = str(config.get("buckets_dir") or "").strip()
+    if buckets_dir:
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(buckets_dir)), "server.log"))
+        candidates.append(os.path.join(buckets_dir, "server.log"))
+    return candidates
+
+
+def _diag_tail_text(path: str, max_bytes: int = 2 * 1024 * 1024) -> list[str]:
+    """Read up to the last max_bytes of a file and split into lines, so a
+    huge unrotated log can't blow up memory."""
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        if size > max_bytes:
+            f.seek(size - max_bytes)
+            f.readline()  # discard a possibly-partial first line
+        data = f.read()
+    return data.decode("utf-8", errors="replace").splitlines()
+
+
+@mcp.custom_route("/api/logs", methods=["GET"])
+async def api_logs(request):
+    """Tail the server log file, if one exists, filtered by level."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+
+    log_file = ""
+    for candidate in _diag_candidate_log_paths():
+        if candidate and os.path.isfile(candidate):
+            log_file = candidate
+            break
+
+    if not log_file:
+        return JSONResponse({
+            "lines": [],
+            "log_file": "",
+            "count": 0,
+            "note": (
+                "未找到日志文件。Haven-Brain 默认只把日志写到标准错误输出（stderr），"
+                "没有文件日志。如需持久化日志，请把进程 stderr 重定向到文件并设置 "
+                "OMBRE_LOG_FILE 环境变量指向该文件，或直接在部署平台查看容器日志。"
+            ),
+        })
+
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", str(_DIAG_LOGS_DEFAULT_LIMIT))), _DIAG_LOGS_MAX_LIMIT))
+    except ValueError:
+        limit = _DIAG_LOGS_DEFAULT_LIMIT
+    level = request.query_params.get("level", "WARNING").upper()
+    allow = {
+        "ERROR": ("ERROR",),
+        "WARNING": ("WARNING", "ERROR"),
+        "INFO": ("INFO", "WARNING", "ERROR"),
+        "ALL": None,
+    }
+    keep = allow.get(level, ("WARNING", "ERROR"))
+
+    try:
+        raw_lines = _diag_tail_text(log_file)
+        if keep is not None:
+            filtered = [ln for ln in raw_lines if any(f" {lvl}: " in ln for lvl in keep)]
+        else:
+            filtered = raw_lines
+        lines = filtered[-limit:]
+        return JSONResponse({
+            "lines": lines,
+            "log_file": log_file,
+            "level": level,
+            "count": len(lines),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _diag_errors_jsonl_path() -> str:
+    """Haven-Brain has no errors.py module, so there's no writer for this
+    file today. This just gives dashboards that expect it a graceful,
+    consistent shape instead of a 404 — if a future errors.jsonl writer is
+    added, it should live at this same path."""
+    base = str(config.get("state_dir") or config.get("buckets_dir") or "").strip()
+    return os.path.join(base, "errors.jsonl") if base else ""
+
+
+@mcp.custom_route("/api/errors/recent", methods=["GET"])
+async def api_errors_recent(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    path = _diag_errors_jsonl_path()
+    if not path or not os.path.isfile(path):
+        return JSONResponse({
+            "ok": True,
+            "count": 0,
+            "errors": [],
+            "note": "Haven-Brain 目前没有统一错误码记录（errors.jsonl 不存在），此接口总是返回空列表。",
+        })
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", str(_DIAG_ERRORS_DEFAULT_LIMIT))), _DIAG_ERRORS_MAX_LIMIT))
+    except ValueError:
+        limit = _DIAG_ERRORS_DEFAULT_LIMIT
+    items: list = []
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    items.append(_json_lib.loads(line))
+                except Exception:
+                    continue
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    items = items[-limit:]
+    items.reverse()  # newest first
+    return JSONResponse({"ok": True, "count": len(items), "errors": items})
+
+
+@mcp.custom_route("/api/errors/clear", methods=["POST"])
+async def api_errors_clear(request):
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    path = _diag_errors_jsonl_path()
+    if not path or not os.path.isfile(path):
+        return JSONResponse({"ok": True, "cleared": 0})
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            cleared = sum(1 for line in f if line.strip())
+        open(path, "w", encoding="utf-8").close()
+        return JSONResponse({"ok": True, "cleared": cleared})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+async def _find_pinned_desync_orphans() -> list[dict]:
+    """Buckets whose metadata says pinned=True but whose file isn't actually
+    stored under permanent/.
+
+    Haven-Brain keeps no separate in-memory pinned index — the markdown
+    frontmatter's `pinned` flag plus the file's directory location together
+    ARE the source of truth (create()/update() both auto-move pinned=True
+    buckets into permanent_dir). So a desync here means those two disagree:
+    the flag says "pinned" but the bucket isn't actually sitting in the
+    pinned/permanent location, e.g. because it was hand-edited, imported, or
+    an earlier move failed partway through.
+    """
+    orphans: list[dict] = []
+    permanent_root = os.path.normpath(os.path.abspath(bucket_mgr.permanent_dir))
+    buckets = await bucket_mgr.list_all(include_archive=True)
+    for b in buckets:
+        meta = b.get("metadata") or {}
+        if not meta.get("pinned"):
+            continue
+        raw_path = b.get("path") or ""
+        path = os.path.normpath(os.path.abspath(raw_path))
+        if path == permanent_root or path.startswith(permanent_root + os.sep):
+            continue
+        orphans.append({
+            "id": b.get("id"),
+            "name": meta.get("name", b.get("id")),
+            "type": meta.get("type"),
+            "domain": meta.get("domain"),
+            "path": raw_path,
+        })
+    return orphans
+
+
+@mcp.custom_route("/api/maintenance/fix-pinned-desync", methods=["GET"])
+async def api_fix_pinned_desync_preview(request):
+    """Dry-run: report pinned/location desyncs without changing anything."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        orphans = await _find_pinned_desync_orphans()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse({
+        "ok": True,
+        "dry_run": True,
+        "orphan_count": len(orphans),
+        "orphans": orphans,
+    })
+
+
+@mcp.custom_route("/api/maintenance/fix-pinned-desync", methods=["POST"])
+async def api_fix_pinned_desync_apply(request):
+    """Actually demote orphaned pinned buckets (clear the stale pinned flag)."""
+    from starlette.responses import JSONResponse
+    err = _require_dashboard_auth(request)
+    if err:
+        return err
+    try:
+        orphans = await _find_pinned_desync_orphans()
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    fixed: list[str] = []
+    failed: list[str] = []
+    for orphan in orphans:
+        bucket_id = orphan["id"]
+        try:
+            ok = await bucket_mgr.update(bucket_id, pinned=False)
+            (fixed if ok else failed).append(bucket_id)
+        except Exception as e:
+            failed.append(bucket_id)
+            logger.warning(f"[fix-pinned-desync] failed to demote {bucket_id}: {e}")
+
+    return JSONResponse({
+        "ok": not failed,
+        "orphan_count": len(orphans),
+        "fixed": fixed,
+        "failed": failed,
+    })
+
+
+# =============================================================
 # Import API — conversation history import
 # 导入 API — 对话历史导入
 # =============================================================
